@@ -1,0 +1,220 @@
+[
+  {
+    "inputs": [
+      { "internalType": "string", "name": "_name", "type": "string" },
+      { "internalType": "string", "name": "_location", "type": "string" }
+    ],
+    "name": "registerFarm",
+    "outputs": [{ "internalType": "uint256", "name": "farmId", "type": "uint256" }],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      { "internalType": "uint256", "name": "_farmId", "type": "uint256" },
+      { "internalType": "string", "name": "_product", "type": "string" },
+      { "internalType": "string", "name": "_category", "type": "string" },
+      { "internalType": "uint256", "name": "_date", "type": "uint256" },
+      { "internalType": "string", "name": "_cid", "type": "string" }
+    ],
+    "name": "createBatch",
+    "outputs": [{ "internalType": "bytes32", "name": "batchHash", "type": "bytes32" }],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      { "internalType": "bytes32", "name": "_batchHash", "type": "bytes32" },
+      { "internalType": "string", "name": "_certId", "type": "string" },
+      { "internalType": "string", "name": "_cid", "type": "string" }
+    ],
+    "name": "certifyBatch",
+    "outputs": [{ "internalType": "bool", "name": "", "type": "bool" }],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      { "internalType": "bytes32", "name": "_batchHash", "type": "bytes32" },
+      { "internalType": "string", "name": "_reason", "type": "string" }
+    ],
+    "name": "rejectBatch",
+    "outputs": [{ "internalType": "bool", "name": "", "type": "bool" }],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [{ "internalType": "bytes32", "name": "_batchHash", "type": "bytes32" }],
+    "name": "confirmPickup",
+    "outputs": [{ "internalType": "bool", "name": "", "type": "bool" }],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      { "internalType": "bytes32", "name": "_batchHash", "type": "bytes32" },
+      { "internalType": "address", "name": "_retailer", "type": "address" }
+    ],
+    "name": "confirmDelivery",
+    "outputs": [{ "internalType": "bool", "name": "", "type": "bool" }],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [{ "internalType": "bytes32", "name": "_batchHash", "type": "bytes32" }],
+    "name": "confirmReceipt",
+    "outputs": [{ "internalType": "bool", "name": "", "type": "bool" }],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [{ "internalType": "bytes32", "name": "_batchHash", "type": "bytes32" }],
+    "name": "listForSale",
+    "outputs": [{ "internalType": "bool", "name": "", "type": "bool" }],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [{ "internalType": "bytes32", "name": "_batchHash", "type": "bytes32" }],
+    "name": "verifyProduct",
+    "outputs": [
+      {
+        "components": [
+          { "internalType": "string", "name": "productName", "type": "string" },
+          { "internalType": "string", "name": "category", "type": "string" },
+          { "internalType": "string", "name": "farmName", "type": "string" },
+          { "internalType": "string", "name": "farmLocation", "type": "string" },
+          { "internalType": "address", "name": "farmer", "type": "address" },
+          { "internalType": "uint256", "name": "harvestDate", "type": "uint256" },
+          { "internalType": "string", "name": "certificationId", "type": "string" },
+          { "internalType": "address", "name": "certifier", "type": "address" },
+          { "internalType": "uint256", "name": "certificationDate", "type": "uint256" },
+          { "internalType": "address", "name": "distributor", "type": "address" },
+          { "internalType": "uint256", "name": "pickupDate", "type": "uint256" },
+          { "internalType": "uint256", "name": "deliveryDate", "type": "uint256" },
+          { "internalType": "address", "name": "retailer", "type": "address" },
+          { "internalType": "uint256", "name": "listingDate", "type": "uint256" },
+          { "internalType": "uint8", "name": "status", "type": "uint8" },
+          { "internalType": "bool", "name": "exists", "type": "bool" }
+        ],
+        "internalType": "struct ProductTrace.BatchRecord",
+        "name": "",
+        "type": "tuple"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [{ "internalType": "address", "name": "_farmer", "type": "address" }],
+    "name": "getBatchesByFarmer",
+    "outputs": [{ "internalType": "bytes32[]", "name": "", "type": "bytes32[]" }],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "getPendingCertifications",
+    "outputs": [{ "internalType": "bytes32[]", "name": "", "type": "bytes32[]" }],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [{ "internalType": "address", "name": "_certifier", "type": "address" }],
+    "name": "getCertificationsByCertifier",
+    "outputs": [{ "internalType": "bytes32[]", "name": "", "type": "bytes32[]" }],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [{ "internalType": "address", "name": "_distributor", "type": "address" }],
+    "name": "getBatchesForDistributor",
+    "outputs": [{ "internalType": "bytes32[]", "name": "", "type": "bytes32[]" }],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [{ "internalType": "address", "name": "_distributor", "type": "address" }],
+    "name": "getDeliveriesByDistributor",
+    "outputs": [{ "internalType": "bytes32[]", "name": "", "type": "bytes32[]" }],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [{ "internalType": "address", "name": "_retailer", "type": "address" }],
+    "name": "getInventoryByRetailer",
+    "outputs": [{ "internalType": "bytes32[]", "name": "", "type": "bytes32[]" }],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [{ "internalType": "address", "name": "_farmer", "type": "address" }],
+    "name": "getFarmByFarmer",
+    "outputs": [
+      { "internalType": "uint256", "name": "farmId", "type": "uint256" },
+      { "internalType": "string", "name": "name", "type": "string" },
+      { "internalType": "string", "name": "location", "type": "string" },
+      { "internalType": "bool", "name": "exists", "type": "bool" }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      { "indexed": true, "internalType": "bytes32", "name": "batchHash", "type": "bytes32" },
+      { "indexed": true, "internalType": "address", "name": "farmer", "type": "address" },
+      { "indexed": false, "internalType": "string", "name": "product", "type": "string" }
+    ],
+    "name": "BatchCreated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      { "indexed": true, "internalType": "bytes32", "name": "batchHash", "type": "bytes32" },
+      { "indexed": true, "internalType": "address", "name": "certifier", "type": "address" }
+    ],
+    "name": "BatchCertified",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      { "indexed": true, "internalType": "bytes32", "name": "batchHash", "type": "bytes32" },
+      { "indexed": false, "internalType": "string", "name": "reason", "type": "string" }
+    ],
+    "name": "BatchRejected",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      { "indexed": true, "internalType": "bytes32", "name": "batchHash", "type": "bytes32" },
+      { "indexed": true, "internalType": "address", "name": "distributor", "type": "address" }
+    ],
+    "name": "BatchPickedUp",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      { "indexed": true, "internalType": "bytes32", "name": "batchHash", "type": "bytes32" },
+      { "indexed": true, "internalType": "address", "name": "retailer", "type": "address" }
+    ],
+    "name": "BatchDelivered",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [{ "indexed": true, "internalType": "bytes32", "name": "batchHash", "type": "bytes32" }],
+    "name": "BatchReceived",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [{ "indexed": true, "internalType": "bytes32", "name": "batchHash", "type": "bytes32" }],
+    "name": "BatchListed",
+    "type": "event"
+  }
+]
