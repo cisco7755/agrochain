@@ -7,13 +7,13 @@ import { ethers } from 'ethers';
 const SystemLog = () => {
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
-  const { getUserRegistry, getProductTrace } = useContract();
+  const { getAgroChain } = useContract();
 
   useEffect(() => {
     const fetchEvents = async () => {
       try {
-        const registry = getUserRegistry();
-        const trace = getProductTrace();
+        const registry = getAgroChain();
+        const trace = getAgroChain();
         const provider = registry.provider;
         const currentBlock = await provider.getBlockNumber();
         const fromBlock = Math.max(0, currentBlock - 5000);

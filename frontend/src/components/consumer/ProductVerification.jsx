@@ -16,14 +16,14 @@ const ProductVerification = ({ initialHash = '' }) => {
   const [result, setResult] = useState(null);
   const [verified, setVerified] = useState(null);
   const [loading, setLoading] = useState(false);
-  const { getProductTrace } = useContract();
+  const { getAgroChain } = useContract();
 
   const handleVerify = async () => {
     const hash = batchHash.trim();
     if (!hash) { toast.error('Please enter or scan a batch hash'); return; }
     try {
       setLoading(true); setResult(null); setVerified(null);
-      const trace = getProductTrace();
+      const trace = getAgroChain();
       const record = await trace.verifyProduct(hash);
       if (!record.exists) {
         setVerified(false);

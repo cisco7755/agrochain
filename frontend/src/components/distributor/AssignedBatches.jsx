@@ -8,12 +8,12 @@ const AssignedBatches = ({ account, onSelectPickup, onSelectDelivery }) => {
   const [batches, setBatches] = useState([]);
   const [details, setDetails] = useState({});
   const [loading, setLoading] = useState(true);
-  const { getProductTrace } = useContract();
+  const { getAgroChain } = useContract();
 
   useEffect(() => {
     const fetch = async () => {
       try {
-        const trace = getProductTrace();
+        const trace = getAgroChain();
         const hashes = await trace.getBatchesForDistributor(account);
         setBatches(hashes);
         const deets = {};

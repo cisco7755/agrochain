@@ -18,7 +18,8 @@ import {
   Activity,
 } from 'lucide-react';
 import ProductCard from '../components/ProductCard';
-import { getProducts, getStats } from '../services/api';
+import { useAuth } from '../context/AuthContext';
+import { useContract } from '../hooks/useContract';
 
 const HOW_IT_WORKS = [
   {
@@ -78,20 +79,108 @@ const WHY_AGROCHAIN = [
   },
 ];
 
+// Map a blockchain Product struct → shape ProductCard expects
+function mapProduct(p, farmerName) {
+  return {
+    id: Number(p.productId),
+    name: p.name,
+    batch_number: p.batchNumber,
+    product_type: p.productType,
+    is_organic: p.isOrganic,
+    is_certified: p.isCertified,
+    farmer_name: farmerName || null,
+    farm_location: p.farmLocation,
+    // harvestDate is a unix timestamp (BigNumber) — convert to ISO string
+    harvest_date: p.harvestDate && Number(p.harvestDate) > 0
+      ? new Date(Number(p.harvestDate) * 1000).toISOString()
+      : null,
+  };
+}
+
 export default function Home() {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const { getAgroChain } = useContract();
+
   const [stats, setStats] = useState(null);
   const [products, setProducts] = useState([]);
+  const [loadingProducts, setLoadingProducts] = useState(true);
   const [trackId, setTrackId] = useState('');
 
+  const isFarmer = user?.role === 'FARMER';
+
   useEffect(() => {
-    getStats()
-      .then(setStats)
-      .catch(() => {});
-    getProducts(0, 5)
-      .then((data) => setProducts(Array.isArray(data) ? data.slice(0, 5) : []))
-      .catch(() => {});
-  }, []);
+    let cancelled = false;
+
+    const load = async () => {
+      try {
+        const contract = getAgroChain();
+        const currentBlock = await contract.provider.getBlockNumber();
+        const fromBlock = Math.max(0, currentBlock - 100000);
+
+        // ── Stats from blockchain ─────────────────────────────────────────────
+        const [totalBN, actorEvents, eventEvents, certEvents] = await Promise.all([
+          contract.getTotalProducts(),
+          contract.queryFilter(contract.filters.ActorRegistered(), fromBlock),
+          contract.queryFilter(contract.filters.EventRecorded(), fromBlock),
+          contract.queryFilter(contract.filters.ProductCertified(), fromBlock),
+        ]);
+        if (!cancelled) {
+          setStats({
+            total_products: Number(totalBN),
+            total_actors: actorEvents.length,
+            total_events: eventEvents.length,
+            certified_products: certEvents.length,
+          });
+        }
+
+        // ── Products from blockchain ──────────────────────────────────────────
+        const registeredEvents = await contract.queryFilter(
+          contract.filters.ProductRegistered(),
+          fromBlock,
+        );
+
+        // Filter: FARMER sees only their own; everyone else sees all
+        const filtered = isFarmer
+          ? registeredEvents.filter(
+              (e) => (e.args.farmer || e.args[2])?.toLowerCase() === user.address.toLowerCase(),
+            )
+          : registeredEvents;
+
+        // Take the 6 most recent
+        const recent = [...filtered].reverse().slice(0, 6);
+
+        const details = await Promise.all(
+          recent.map(async (e) => {
+            const id = e.args.productId || e.args[0];
+            try {
+              const p = await contract.getProduct(id);
+              // Fetch farmer name from actor registry
+              let farmerName = null;
+              try {
+                const actor = await contract.getActor(p.farmer);
+                farmerName = actor.name || null;
+              } catch {}
+              return mapProduct(p, farmerName);
+            } catch {
+              return null;
+            }
+          }),
+        );
+
+        if (!cancelled) {
+          setProducts(details.filter(Boolean));
+        }
+      } catch (err) {
+        console.error('Home: failed to load blockchain data', err);
+      } finally {
+        if (!cancelled) setLoadingProducts(false);
+      }
+    };
+
+    load();
+    return () => { cancelled = true; };
+  }, [user?.role, user?.address]);
 
   const handleSearch = (e) => {
     e.preventDefault();
@@ -99,11 +188,15 @@ export default function Home() {
     navigate(`/track/${encodeURIComponent(trackId.trim())}`);
   };
 
+  const sectionTitle = isFarmer ? 'My Products' : 'Recent Products';
+  const sectionDesc = isFarmer
+    ? 'Products you have registered on AgroChain'
+    : 'Latest products registered on AgroChain';
+
   return (
     <div className="flex flex-col">
       {/* ── Hero ── */}
       <section className="relative overflow-hidden bg-gradient-to-br from-green-950 via-green-900 to-emerald-800 text-white">
-        {/* Decorative blobs */}
         <div className="absolute inset-0 pointer-events-none overflow-hidden">
           <div className="absolute -top-32 -right-32 w-96 h-96 bg-emerald-500/20 rounded-full blur-3xl" />
           <div className="absolute top-1/2 -left-24 w-72 h-72 bg-green-400/15 rounded-full blur-2xl" />
@@ -112,7 +205,6 @@ export default function Home() {
 
         <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 lg:py-28">
           <div className="max-w-3xl">
-            {/* Tag */}
             <div className="inline-flex items-center gap-2 bg-green-800/60 border border-green-700/50 rounded-full px-4 py-1.5 mb-6">
               <Sprout className="w-4 h-4 text-green-400" />
               <span className="text-sm font-medium text-green-300">Blockchain-Powered Food Traceability</span>
@@ -130,7 +222,6 @@ export default function Home() {
               the global food supply chain.
             </p>
 
-            {/* CTA Buttons */}
             <div className="mt-8 flex flex-wrap gap-4">
               <button
                 onClick={() => navigate('/track')}
@@ -139,16 +230,17 @@ export default function Home() {
                 <Search className="w-5 h-5" />
                 Track a Product
               </button>
-              <button
-                onClick={() => navigate('/register')}
-                className="flex items-center gap-2 px-6 py-3.5 bg-green-600 text-white font-bold rounded-xl border border-green-500 shadow-lg hover:bg-green-500 hover:shadow-xl hover:-translate-y-0.5 transition-all duration-150"
-              >
-                <PlusCircle className="w-5 h-5" />
-                Register Product
-              </button>
+              {(user?.role === 'FARMER' || user?.role === 'ADMIN') && (
+                <button
+                  onClick={() => navigate('/register')}
+                  className="flex items-center gap-2 px-6 py-3.5 bg-green-600 text-white font-bold rounded-xl border border-green-500 shadow-lg hover:bg-green-500 hover:shadow-xl hover:-translate-y-0.5 transition-all duration-150"
+                >
+                  <PlusCircle className="w-5 h-5" />
+                  Register Product
+                </button>
+              )}
             </div>
 
-            {/* Quick search */}
             <form onSubmit={handleSearch} className="mt-8 flex max-w-md gap-2">
               <input
                 type="text"
@@ -174,12 +266,12 @@ export default function Home() {
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-6">
             {[
               { label: 'Products Registered', value: stats?.total_products ?? '—', icon: Package, color: 'text-green-600' },
-              { label: 'Certified Products', value: stats?.certified_products ?? '—', icon: Award, color: 'text-emerald-600' },
-              { label: 'Supply Chain Events', value: stats?.total_events ?? '—', icon: Activity, color: 'text-blue-600' },
-              { label: 'Network Actors', value: stats?.total_actors ?? '—', icon: Users, color: 'text-purple-600' },
+              { label: 'Certified Products',  value: stats?.certified_products ?? '—', icon: Award,    color: 'text-emerald-600' },
+              { label: 'Supply Chain Events', value: stats?.total_events ?? '—',      icon: Activity,  color: 'text-blue-600' },
+              { label: 'Network Actors',      value: stats?.total_actors ?? '—',      icon: Users,     color: 'text-purple-600' },
             ].map(({ label, value, icon: Icon, color }) => (
               <div key={label} className="text-center">
-                <div className={`inline-flex items-center justify-center w-10 h-10 rounded-xl bg-gray-50 mb-2`}>
+                <div className="inline-flex items-center justify-center w-10 h-10 rounded-xl bg-gray-50 mb-2">
                   <Icon className={`w-5 h-5 ${color}`} />
                 </div>
                 <p className="text-2xl font-extrabold text-gray-900">
@@ -242,7 +334,7 @@ export default function Home() {
                 key={title}
                 className={`${bg} ${border} border rounded-2xl p-8 flex flex-col gap-4 hover:shadow-md transition-shadow duration-200`}
               >
-                <div className={`w-14 h-14 bg-white rounded-2xl flex items-center justify-center shadow-sm`}>
+                <div className="w-14 h-14 bg-white rounded-2xl flex items-center justify-center shadow-sm">
                   <Icon className={`w-7 h-7 ${color}`} />
                 </div>
                 <div>
@@ -255,7 +347,7 @@ export default function Home() {
         </div>
       </section>
 
-      {/* ── Recent Products ── */}
+      {/* ── Recent / My Products ── */}
       <section className="py-20 bg-gray-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-end justify-between mb-8">
@@ -263,8 +355,8 @@ export default function Home() {
               <span className="inline-block bg-green-100 text-green-700 text-xs font-semibold uppercase tracking-wider px-3 py-1 rounded-full mb-2">
                 Live Data
               </span>
-              <h2 className="text-2xl font-extrabold text-gray-900">Recent Products</h2>
-              <p className="text-gray-500 text-sm mt-1">Latest products registered on AgroChain</p>
+              <h2 className="text-2xl font-extrabold text-gray-900">{sectionTitle}</h2>
+              <p className="text-gray-500 text-sm mt-1">{sectionDesc}</p>
             </div>
             <button
               onClick={() => navigate('/dashboard')}
@@ -274,23 +366,39 @@ export default function Home() {
             </button>
           </div>
 
-          {products.length === 0 ? (
+          {loadingProducts ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+              {[...Array(3)].map((_, i) => (
+                <div key={i} className="bg-white rounded-xl border border-gray-100 shadow-sm p-5 animate-pulse">
+                  <div className="h-4 bg-gray-200 rounded w-3/4 mb-3" />
+                  <div className="h-3 bg-gray-100 rounded w-1/2 mb-4" />
+                  <div className="h-3 bg-gray-100 rounded w-2/3 mb-2" />
+                  <div className="h-3 bg-gray-100 rounded w-1/2 mb-2" />
+                  <div className="h-8 bg-gray-100 rounded mt-4" />
+                </div>
+              ))}
+            </div>
+          ) : products.length === 0 ? (
             <div className="text-center py-16 bg-white rounded-2xl border border-gray-100">
               <Leaf className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-              <p className="text-gray-400 font-medium">No products registered yet</p>
-              <button
-                onClick={() => navigate('/register')}
-                className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-green-600 hover:text-green-700"
-              >
-                <PlusCircle className="w-4 h-4" />
-                Register the first product
-              </button>
+              <p className="text-gray-400 font-medium">
+                {isFarmer ? 'You have not registered any products yet' : 'No products registered yet'}
+              </p>
+              {(user?.role === 'FARMER' || user?.role === 'ADMIN') && (
+                <button
+                  onClick={() => navigate('/register')}
+                  className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-green-600 hover:text-green-700"
+                >
+                  <PlusCircle className="w-4 h-4" />
+                  Register the first product
+                </button>
+              )}
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
               {products.map((p) => (
                 <ProductCard
-                  key={p.id || p.batch_number}
+                  key={p.id}
                   product={p}
                   onClick={() => navigate(`/track/${p.id}`)}
                 />
@@ -320,13 +428,15 @@ export default function Home() {
             Register your farm's products today and give consumers the transparency they deserve.
           </p>
           <div className="flex flex-wrap gap-4 justify-center">
-            <button
-              onClick={() => navigate('/register')}
-              className="flex items-center gap-2 px-8 py-3.5 bg-white text-green-800 font-bold rounded-xl shadow-lg hover:bg-green-50 transition-all duration-150"
-            >
-              <PlusCircle className="w-5 h-5" />
-              Register a Product
-            </button>
+            {(user?.role === 'FARMER' || user?.role === 'ADMIN') && (
+              <button
+                onClick={() => navigate('/register')}
+                className="flex items-center gap-2 px-8 py-3.5 bg-white text-green-800 font-bold rounded-xl shadow-lg hover:bg-green-50 transition-all duration-150"
+              >
+                <PlusCircle className="w-5 h-5" />
+                Register a Product
+              </button>
+            )}
             <button
               onClick={() => navigate('/dashboard')}
               className="flex items-center gap-2 px-8 py-3.5 bg-green-700 text-white font-bold rounded-xl border border-green-600 shadow hover:bg-green-600 transition-all duration-150"

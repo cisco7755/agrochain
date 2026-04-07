@@ -10,7 +10,7 @@ const RegisterActor = () => {
   const [selectedRole, setSelectedRole] = useState('');
   const [loading, setLoading] = useState(false);
   const [txHash, setTxHash] = useState(null);
-  const { getUserRegistry } = useContract();
+  const { getAgroChain } = useContract();
 
   const handleRegister = async () => {
     if (!address || !selectedRole) {
@@ -24,7 +24,7 @@ const RegisterActor = () => {
     try {
       setLoading(true);
       setTxHash(null);
-      const registry = getUserRegistry(true);
+      const registry = getAgroChain(true);
       const toastId = toast.loading('Waiting for MetaMask confirmation...');
       const tx = await registry.registerUser(address, ROLE_NUMBERS[selectedRole]);
       toast.loading('Transaction submitted. Waiting for confirmation...', { id: toastId });

@@ -7,7 +7,7 @@ const ConfirmDelivery = ({ batchHash, onDone }) => {
   const [retailerAddress, setRetailerAddress] = useState('');
   const [loading, setLoading] = useState(false);
   const [txHash, setTxHash] = useState(null);
-  const { getProductTrace } = useContract();
+  const { getAgroChain } = useContract();
 
   const handleDelivery = async () => {
     if (!retailerAddress) { toast.error('Please enter the retailer wallet address'); return; }
@@ -16,7 +16,7 @@ const ConfirmDelivery = ({ batchHash, onDone }) => {
     }
     try {
       setLoading(true); setTxHash(null);
-      const trace = getProductTrace(true);
+      const trace = getAgroChain(true);
       const toastId = toast.loading('Waiting for MetaMask confirmation...');
       const tx = await trace.confirmDelivery(batchHash, retailerAddress);
       toast.loading('Recording delivery on blockchain...', { id: toastId });

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { ethers } from 'ethers';
-import { CONTRACT_CONFIG, } from '../config/contracts';
-import { SEPOLIA_PARAMS } from '../config/constants';
+import { CONTRACT_CONFIG } from '../config/contracts';
+import { AMOY_PARAMS, LOCALHOST_PARAMS } from '../config/constants';
 
 export const useWallet = () => {
   const [account, setAccount] = useState(null);
@@ -16,25 +16,24 @@ export const useWallet = () => {
     const network = await provider.getNetwork();
     const correct = network.chainId === CONTRACT_CONFIG.chainId;
     setIsCorrectNetwork(correct);
-    if (!correct) {
-      setError('Wrong network. Please switch to Sepolia testnet.');
-    } else {
-      setError(null);
-    }
+    if (!correct) setError('Wrong network. Please switch to Polygon Amoy testnet.');
+    else setError(null);
     return correct;
   };
 
-  const switchToSepolia = async () => {
+  const switchToAmoy = async () => {
+    const isLocalhost = CONTRACT_CONFIG.chainId === 31337;
+    const params = isLocalhost ? LOCALHOST_PARAMS : AMOY_PARAMS;
     try {
       await window.ethereum.request({
         method: 'wallet_switchEthereumChain',
-        params: [{ chainId: SEPOLIA_PARAMS.chainId }],
+        params: [{ chainId: params.chainId }],
       });
     } catch (switchError) {
       if (switchError.code === 4902) {
         await window.ethereum.request({
           method: 'wallet_addEthereumChain',
-          params: [SEPOLIA_PARAMS],
+          params: [params],
         });
       } else {
         throw switchError;
@@ -51,19 +50,18 @@ export const useWallet = () => {
         return;
       }
       const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+      localStorage.removeItem('agrochain_disconnected');
       setAccount(accounts[0]);
       setIsConnected(true);
       await checkNetwork();
     } catch (err) {
-      if (err.code === 4001) {
-        setError('Connection rejected. Please approve MetaMask to continue.');
-      } else {
-        setError('Wallet connection failed: ' + err.message);
-      }
+      if (err.code === 4001) setError('Connection rejected. Please approve MetaMask to continue.');
+      else setError('Wallet connection failed: ' + err.message);
     }
   };
 
   const disconnectWallet = () => {
+    localStorage.setItem('agrochain_disconnected', '1');
     setAccount(null);
     setIsConnected(false);
     setIsCorrectNetwork(false);
@@ -72,6 +70,8 @@ export const useWallet = () => {
   useEffect(() => {
     const init = async () => {
       if (!window.ethereum) { setLoading(false); return; }
+      // If user manually disconnected, stay disconnected until they reconnect
+      if (localStorage.getItem('agrochain_disconnected')) { setLoading(false); return; }
       try {
         const accounts = await window.ethereum.request({ method: 'eth_accounts' });
         if (accounts.length > 0) {
@@ -86,13 +86,8 @@ export const useWallet = () => {
 
     if (window.ethereum) {
       window.ethereum.on('accountsChanged', (accounts) => {
-        if (accounts.length === 0) {
-          setAccount(null);
-          setIsConnected(false);
-        } else {
-          setAccount(accounts[0]);
-          setIsConnected(true);
-        }
+        if (accounts.length === 0) { setAccount(null); setIsConnected(false); }
+        else { setAccount(accounts[0]); setIsConnected(true); }
       });
       window.ethereum.on('chainChanged', () => window.location.reload());
     }
@@ -106,6 +101,6 @@ export const useWallet = () => {
 
   return {
     account, isConnected, isCorrectNetwork, error, loading,
-    connectWallet, disconnectWallet, switchToSepolia,
+    connectWallet, disconnectWallet, switchToSepolia: switchToAmoy,
   };
 };

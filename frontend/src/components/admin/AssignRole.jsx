@@ -9,7 +9,7 @@ const AssignRole = () => {
   const [newRole, setNewRole] = useState('');
   const [loading, setLoading] = useState(false);
   const [txHash, setTxHash] = useState(null);
-  const { getUserRegistry } = useContract();
+  const { getAgroChain } = useContract();
 
   const handleAssign = async () => {
     if (!address || !newRole) {
@@ -23,7 +23,7 @@ const AssignRole = () => {
     try {
       setLoading(true);
       setTxHash(null);
-      const registry = getUserRegistry(true);
+      const registry = getAgroChain(true);
       const toastId = toast.loading('Waiting for MetaMask confirmation...');
       const tx = await registry.updateRole(address, ROLE_NUMBERS[newRole]);
       toast.loading('Submitting role update...', { id: toastId });

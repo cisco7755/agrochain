@@ -7,12 +7,12 @@ const PendingRequests = ({ onSelect }) => {
   const [pending, setPending] = useState([]);
   const [details, setDetails] = useState({});
   const [loading, setLoading] = useState(true);
-  const { getProductTrace } = useContract();
+  const { getAgroChain } = useContract();
 
   useEffect(() => {
     const fetch = async () => {
       try {
-        const trace = getProductTrace();
+        const trace = getAgroChain();
         const hashes = await trace.getPendingCertifications();
         setPending(hashes);
         const deets = {};

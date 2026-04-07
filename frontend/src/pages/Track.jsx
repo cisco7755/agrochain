@@ -1,214 +1,184 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import {
   Search, Leaf, Award, MapPin, User, Calendar, Hash,
-  Package, ChevronRight, Plus, X, Loader2, ExternalLink,
-  AlertTriangle, Thermometer, Download, Upload, Map, FileText,
+  Package, ChevronRight, Loader2, ExternalLink,
+  AlertTriangle, Thermometer, FileText, Map,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import Timeline from '../components/Timeline';
 import ColdChainChart from '../components/ColdChainChart';
 import SupplyChainMap from '../components/SupplyChainMap';
-import {
-  trackProduct, getProductByBatch, createEvent,
-  uploadProductImage, uploadCertificate, exportProductAuditCSV,
-} from '../services/api';
-import { useAuth } from '../context/AuthContext';
+import { useContract } from '../hooks/useContract';
 
-const EVENT_TYPES = ['HARVESTED', 'PROCESSED', 'PACKAGED', 'SHIPPED', 'RECEIVED', 'CERTIFIED', 'SOLD'];
-const ACTOR_ROLES = ['FARMER', 'PROCESSOR', 'DISTRIBUTOR', 'RETAILER', 'CERTIFIER'];
+// ── Enum maps (must match AgroChain.sol) ─────────────────────────────────────
+const EVENT_TYPE_NAMES = [
+  'REGISTERED', 'HARVESTED', 'PROCESSED', 'PACKAGED',
+  'SHIPPED', 'RECEIVED', 'CERTIFIED', 'SOLD',
+];
+const ROLE_NAMES = ['NONE', 'FARMER', 'PROCESSOR', 'DISTRIBUTOR', 'RETAILER', 'CERTIFIER'];
 
 const TABS = [
-  { id: 'timeline', label: 'Timeline', icon: Package },
+  { id: 'timeline',  label: 'Timeline',   icon: Package },
   { id: 'coldchain', label: 'Cold Chain', icon: Thermometer },
-  { id: 'map', label: 'Map', icon: Map },
+  { id: 'map',       label: 'Map',        icon: Map },
 ];
 
-function formatDate(d) {
-  if (!d) return '—';
-  try { return new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }); }
-  catch { return d; }
+function formatDate(ts) {
+  if (!ts) return '—';
+  try {
+    return new Date(ts).toLocaleDateString('en-US', {
+      year: 'numeric', month: 'long', day: 'numeric',
+    });
+  } catch { return ts; }
 }
 
-function isExpiringSoon(dateStr) {
-  if (!dateStr) return false;
-  const diff = new Date(dateStr) - new Date();
+function isExpiringSoon(ts) {
+  if (!ts) return false;
+  const diff = new Date(ts) - new Date();
   return diff > 0 && diff < 7 * 24 * 60 * 60 * 1000;
 }
 
-function isExpired(dateStr) {
-  if (!dateStr) return false;
-  return new Date(dateStr) < new Date();
+function isExpired(ts) {
+  if (!ts) return false;
+  return new Date(ts) < new Date();
 }
 
-function EventModal({ productId, onClose, onSuccess }) {
-  const [form, setForm] = useState({
-    product_id: productId, event_type: 'SHIPPED', actor_name: '',
-    actor_role: 'DISTRIBUTOR', location: '', location_lat: '', location_lng: '',
-    temperature: '', humidity: '', notes: '',
-  });
-  const [submitting, setSubmitting] = useState(false);
-  const set = (f) => (e) => setForm((v) => ({ ...v, [f]: e.target.value }));
+// ── Load product + events from blockchain ─────────────────────────────────────
+async function loadFromChain(contract, productId) {
+  const [rawProduct, rawEvents] = await Promise.all([
+    contract.getProduct(productId),
+    contract.getProductEvents(productId),
+  ]);
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!form.actor_name || !form.location) { toast.error('Actor name and location required'); return; }
-    setSubmitting(true);
+  // Resolve farmer name
+  let farmerName = null;
+  try {
+    const farmerActor = await contract.getActor(rawProduct.farmer);
+    farmerName = farmerActor.name || null;
+  } catch {}
+
+  // Resolve actor names/roles for each event (deduplicated)
+  const actorCache = {};
+  const getActorInfo = async (addr) => {
+    const key = addr.toLowerCase();
+    if (actorCache[key]) return actorCache[key];
     try {
-      await createEvent({
-        ...form,
-        temperature: form.temperature !== '' ? parseFloat(form.temperature) : null,
-        humidity: form.humidity !== '' ? parseFloat(form.humidity) : null,
-        location_lat: form.location_lat !== '' ? parseFloat(form.location_lat) : null,
-        location_lng: form.location_lng !== '' ? parseFloat(form.location_lng) : null,
-      });
-      toast.success('Event recorded on blockchain!');
-      onSuccess(); onClose();
-    } catch (err) { toast.error(err.message); }
-    finally { setSubmitting(false); }
+      const a = await contract.getActor(addr);
+      actorCache[key] = { name: a.name || null, role: ROLE_NAMES[Number(a.role)] || 'NONE' };
+    } catch {
+      actorCache[key] = { name: null, role: 'NONE' };
+    }
+    return actorCache[key];
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto animate-scale-in">
-        <div className="flex items-center justify-between p-5 border-b border-gray-100 sticky top-0 bg-white">
-          <h3 className="text-base font-bold text-gray-900">Add Supply Chain Event</h3>
-          <button onClick={onClose} className="p-1.5 hover:bg-gray-100 rounded-lg"><X className="w-4 h-4 text-gray-500" /></button>
-        </div>
-        <form onSubmit={handleSubmit} className="p-5 space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-semibold text-gray-600 mb-1.5">Event Type *</label>
-              <select value={form.event_type} onChange={set('event_type')}
-                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500">
-                {EVENT_TYPES.map((t) => <option key={t}>{t}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-gray-600 mb-1.5">Actor Role *</label>
-              <select value={form.actor_role} onChange={set('actor_role')}
-                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500">
-                {ACTOR_ROLES.map((r) => <option key={r}>{r}</option>)}
-              </select>
-            </div>
-          </div>
-          <div>
-            <label className="block text-xs font-semibold text-gray-600 mb-1.5">Actor Name *</label>
-            <input value={form.actor_name} onChange={set('actor_name')} placeholder="e.g. FreshLogistics Ltd" required
-              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500" />
-          </div>
-          <div>
-            <label className="block text-xs font-semibold text-gray-600 mb-1.5">Location *</label>
-            <input value={form.location} onChange={set('location')} placeholder="e.g. Mombasa, Kenya" required
-              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500" />
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-semibold text-gray-600 mb-1.5">Latitude</label>
-              <input type="number" step="any" value={form.location_lat} onChange={set('location_lat')} placeholder="-1.2921"
-                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500" />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-gray-600 mb-1.5">Longitude</label>
-              <input type="number" step="any" value={form.location_lng} onChange={set('location_lng')} placeholder="36.8219"
-                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500" />
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-semibold text-gray-600 mb-1.5">Temperature (°C)</label>
-              <input type="number" step="0.1" value={form.temperature} onChange={set('temperature')} placeholder="e.g. 4.5"
-                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500" />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-gray-600 mb-1.5">Humidity (%)</label>
-              <input type="number" min="0" max="100" value={form.humidity} onChange={set('humidity')} placeholder="e.g. 65"
-                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500" />
-            </div>
-          </div>
-          <div>
-            <label className="block text-xs font-semibold text-gray-600 mb-1.5">Notes</label>
-            <textarea value={form.notes} onChange={set('notes')} rows={2} placeholder="Additional details…"
-              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 resize-none" />
-          </div>
-          <div className="flex gap-3">
-            <button type="button" onClick={onClose}
-              className="flex-1 py-2.5 text-sm font-semibold text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-xl">Cancel</button>
-            <button type="submit" disabled={submitting}
-              className="flex-1 py-2.5 text-sm font-bold text-white bg-green-600 hover:bg-green-700 disabled:bg-green-400 rounded-xl flex items-center justify-center gap-2">
-              {submitting ? <><Loader2 className="w-4 h-4 animate-spin" /> Recording…</> : 'Record Event'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
+  await Promise.all([...new Set(rawEvents.map((e) => (e.actor || e[1]).toLowerCase()))].map(getActorInfo));
+
+  const harvestTs = Number(rawProduct.harvestDate) > 0
+    ? new Date(Number(rawProduct.harvestDate) * 1000).toISOString()
+    : null;
+  const expiryTs = Number(rawProduct.expiryDate) > 0
+    ? new Date(Number(rawProduct.expiryDate) * 1000).toISOString()
+    : null;
+
+  const product = {
+    id: Number(rawProduct.productId),
+    name: rawProduct.name,
+    product_type: rawProduct.productType,
+    batch_number: rawProduct.batchNumber,
+    farmer_name: farmerName,
+    farmer_address: rawProduct.farmer,
+    farm_location: rawProduct.farmLocation,
+    is_organic: rawProduct.isOrganic,
+    is_certified: rawProduct.isCertified,
+    harvest_date: harvestTs,
+    expiry_date: expiryTs,
+    description: rawProduct.description,
+  };
+
+  const events = rawEvents.map((e, i) => {
+    const actorAddr = e.actor || e[1];
+    const info = actorCache[actorAddr.toLowerCase()] || { name: null, role: 'NONE' };
+    const tempRaw = Number(e.temperature ?? e[4] ?? 0);
+    const humRaw  = Number(e.humidity  ?? e[5] ?? 0);
+    return {
+      id: i,
+      event_type: EVENT_TYPE_NAMES[Number(e.eventType ?? e[0])] || 'REGISTERED',
+      actor_name: info.name,
+      actor_role: info.role,
+      location: e.location ?? e[2] ?? '',
+      notes: e.notes ?? e[3] ?? '',
+      // temperature stored as whole degrees (see RecordEventPanel)
+      temperature: tempRaw !== 0 ? tempRaw : null,
+      humidity: humRaw !== 0 ? humRaw : null,
+      timestamp: new Date(Number(e.timestamp ?? e[6]) * 1000).toISOString(),
+    };
+  });
+
+  return { product, events };
 }
 
 export default function Track() {
-  const { productId } = useParams();
+  const { productId: urlProductId } = useParams();
   const navigate = useNavigate();
-  const [query, setQuery] = useState('');
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [showModal, setShowModal] = useState(false);
-  const [error, setError] = useState('');
-  const [activeTab, setActiveTab] = useState('timeline');
-  const imageInputRef = useRef();
-  const certInputRef = useRef();
+  const { getAgroChain } = useContract();
 
-  const load = async (id) => {
-    setLoading(true); setError('');
-    try { setData(await trackProduct(id)); }
-    catch (err) { setError(err.message || 'Product not found'); setData(null); }
-    finally { setLoading(false); }
+  const [query, setQuery]         = useState('');
+  const [product, setProduct]     = useState(null);
+  const [events, setEvents]       = useState([]);
+  const [loading, setLoading]     = useState(false);
+  const [error, setError]         = useState('');
+  const [activeTab, setActiveTab] = useState('timeline');
+
+  const doLoad = async (idOrBatch) => {
+    setLoading(true); setError(''); setProduct(null); setEvents([]);
+    try {
+      const contract = getAgroChain();
+      let productId;
+
+      if (/^\d+$/.test(idOrBatch)) {
+        productId = parseInt(idOrBatch);
+      } else {
+        // batch number lookup
+        const idBN = await contract.getProductByBatch(idOrBatch);
+        productId = Number(idBN);
+        if (productId === 0) throw new Error(`No product found with batch number "${idOrBatch}"`);
+        // update URL cleanly
+        navigate(`/track/${productId}`, { replace: true });
+        return; // useEffect will re-fire with the new URL param
+      }
+
+      const data = await loadFromChain(contract, productId);
+      setProduct(data.product);
+      setEvents(data.events);
+    } catch (err) {
+      const msg = err?.reason || err?.data?.message || err?.message || 'Product not found';
+      setError(msg);
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
-    if (!productId) return;
-    if (/^\d+$/.test(productId)) { setQuery(productId); load(productId); }
-    else {
-      setQuery(productId); setLoading(true); setError('');
-      getProductByBatch(productId)
-        .then((p) => navigate(`/track/${p.id}`, { replace: true }))
-        .catch((err) => { setError(err.message || 'Product not found'); setLoading(false); });
-    }
-  }, [productId]);
+    if (!urlProductId) return;
+    setQuery(urlProductId);
+    doLoad(urlProductId);
+  }, [urlProductId]);
 
-  const handleSearch = async (e) => {
+  const handleSearch = (e) => {
     e.preventDefault();
-    const q = query.trim(); if (!q) return;
-    setLoading(true); setError('');
-    try {
-      if (/^\d+$/.test(q)) navigate(`/track/${q}`);
-      else { const p = await getProductByBatch(q); navigate(`/track/${p.id}`); }
-    } catch (err) { setError(err.message || 'Product not found'); setLoading(false); }
-  };
-
-  const handleImageUpload = async (e) => {
-    const file = e.target.files?.[0]; if (!file) return;
-    try {
-      await uploadProductImage(data.product.id, file);
-      toast.success('Image uploaded!'); load(data.product.id);
-    } catch (err) { toast.error(err.message); }
-  };
-
-  const handleCertUpload = async (e) => {
-    const file = e.target.files?.[0]; if (!file) return;
-    try {
-      await uploadCertificate(data.product.id, file);
-      toast.success('Certificate uploaded!'); load(data.product.id);
-    } catch (err) { toast.error(err.message); }
+    const q = query.trim();
+    if (!q) return;
+    if (/^\d+$/.test(q)) navigate(`/track/${q}`);
+    else doLoad(q);
   };
 
   const handleExportPDF = async () => {
     const { default: jsPDF } = await import('jspdf');
-    const product = data?.product;
     const doc = new jsPDF({ unit: 'mm', format: 'a4' });
     const pageW = doc.internal.pageSize.getWidth();
 
-    // Header bar
     doc.setFillColor(22, 163, 74);
     doc.rect(0, 0, pageW, 22, 'F');
     doc.setTextColor(255, 255, 255);
@@ -217,7 +187,6 @@ export default function Track() {
     doc.setFontSize(8); doc.setFont('helvetica', 'normal');
     doc.text(`Generated: ${new Date().toLocaleString()}`, 14, 16);
 
-    // Product info
     doc.setTextColor(31, 41, 55);
     doc.setFontSize(16); doc.setFont('helvetica', 'bold');
     doc.text(product?.name || '', 14, 34);
@@ -225,14 +194,13 @@ export default function Track() {
     doc.setTextColor(107, 114, 128);
     doc.text(`${product?.product_type || ''} · ${product?.batch_number || ''}`, 14, 41);
 
-    // Info grid
     const infoRows = [
-      ['Farmer', product?.farmer_name], ['Farm Location', product?.farm_location],
+      ['Farmer',       product?.farmer_name || '—'],
+      ['Farm Location', product?.farm_location || '—'],
       ['Harvest Date', product?.harvest_date ? new Date(product.harvest_date).toLocaleDateString() : '—'],
-      ['Expiry Date', product?.expiry_date ? new Date(product.expiry_date).toLocaleDateString() : '—'],
-      ['Organic', product?.is_organic ? 'Yes' : 'No'], ['Certified', product?.is_certified ? 'Yes' : 'No'],
-      ['Recalled', product?.is_recalled ? 'YES' : 'No'],
-      ['Blockchain TX', product?.blockchain_tx_hash || '—'],
+      ['Expiry Date',  product?.expiry_date  ? new Date(product.expiry_date).toLocaleDateString()  : '—'],
+      ['Organic',      product?.is_organic   ? 'Yes' : 'No'],
+      ['Certified',    product?.is_certified ? 'Yes' : 'No'],
     ];
     let y = 52;
     doc.setFontSize(8);
@@ -240,11 +208,10 @@ export default function Track() {
       doc.setFont('helvetica', 'bold'); doc.setTextColor(55, 65, 81);
       doc.text(`${label}:`, 14, y);
       doc.setFont('helvetica', 'normal'); doc.setTextColor(107, 114, 128);
-      doc.text(String(val || '—'), 55, y);
+      doc.text(String(val), 55, y);
       y += 6;
     });
 
-    // Events table header
     y += 4;
     doc.setFillColor(240, 253, 244);
     doc.rect(14, y - 4, pageW - 28, 8, 'F');
@@ -252,7 +219,6 @@ export default function Track() {
     doc.text('Supply Chain Events', 14, y);
     y += 6;
 
-    const events = data?.events || [];
     doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5); doc.setTextColor(107, 114, 128);
     ['#', 'Event', 'Actor', 'Location', 'Date', 'Temp', 'Humidity'].forEach((h, i) => {
       doc.text(h, [14, 22, 58, 95, 135, 162, 178][i], y);
@@ -262,12 +228,12 @@ export default function Track() {
     events.forEach((ev, i) => {
       if (y > 270) { doc.addPage(); y = 20; }
       doc.text(String(i + 1), 14, y);
-      doc.text((ev.event_type || '').substring(0, 10), 22, y);
+      doc.text(ev.event_type.substring(0, 10), 22, y);
       doc.text((ev.actor_name || '—').substring(0, 18), 58, y);
       doc.text((ev.location || '—').substring(0, 18), 95, y);
       doc.text(ev.timestamp ? new Date(ev.timestamp).toLocaleDateString() : '—', 135, y);
       doc.text(ev.temperature != null ? `${ev.temperature}°C` : '—', 162, y);
-      doc.text(ev.humidity != null ? `${ev.humidity}%` : '—', 178, y);
+      doc.text(ev.humidity    != null ? `${ev.humidity}%`     : '—', 178, y);
       y += 6;
       if (i % 2 === 0) { doc.setFillColor(249, 250, 251); doc.rect(14, y - 5.5, pageW - 28, 6, 'F'); }
     });
@@ -276,28 +242,13 @@ export default function Track() {
     toast.success('PDF exported!');
   };
 
-  const handleExportCSV = async () => {
-    try {
-      const blob = await exportProductAuditCSV(data.product.id);
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url; a.download = `agrochain_audit_${data.product.id}.csv`; a.click();
-      URL.revokeObjectURL(url);
-    } catch (err) { toast.error(err.message); }
-  };
-
-  const { user, isAuthenticated } = useAuth();
-  const canAddEvent = isAuthenticated;
-  const canUploadImage = isAuthenticated && (user?.role === 'ADMIN' || user?.role === 'FARMER');
-  const canUploadCert = isAuthenticated && (user?.role === 'ADMIN' || user?.role === 'CERTIFIER');
-
-  const verifyUrl = data ? `http://${window.location.hostname}:5173/verify/${data.product?.id}` : '';
-  const product = data?.product;
-  const expired = isExpired(product?.expiry_date);
+  const verifyUrl = product ? `http://${window.location.hostname}:5173/verify/${product.id}` : '';
+  const expired      = isExpired(product?.expiry_date);
   const expiringSoon = isExpiringSoon(product?.expiry_date);
 
   return (
     <div className="min-h-screen bg-gray-50 pb-16">
+      {/* Header */}
       <div className="bg-white border-b border-gray-100 px-4 py-6">
         <div className="max-w-5xl mx-auto">
           <div className="flex items-center gap-2 text-sm text-gray-400 mb-2">
@@ -310,146 +261,118 @@ export default function Track() {
       </div>
 
       <div className="max-w-5xl mx-auto px-4 py-8">
+        {/* Search */}
         <form onSubmit={handleSearch} className="flex gap-3 mb-8">
           <div className="relative flex-1">
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-            <input value={query} onChange={(e) => setQuery(e.target.value)}
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
               placeholder="Product ID (e.g. 1) or batch number (e.g. BATCH-2024-001)"
-              className="w-full pl-11 pr-4 py-3 text-sm border border-gray-200 rounded-xl bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+              className="w-full pl-11 pr-4 py-3 text-sm border border-gray-200 rounded-xl bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+            />
           </div>
-          <button type="submit" disabled={loading || !query.trim()}
-            className="px-6 py-3 bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white font-bold text-sm rounded-xl flex items-center gap-2">
-            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />} Search
+          <button
+            type="submit"
+            disabled={loading || !query.trim()}
+            className="px-6 py-3 bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white font-bold text-sm rounded-xl flex items-center gap-2"
+          >
+            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+            Search
           </button>
         </form>
 
-        {error && <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-red-700 text-sm font-medium mb-6">{error}</div>}
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-red-700 text-sm font-medium mb-6 flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 flex-shrink-0" /> {error}
+          </div>
+        )}
 
-        {loading && !data && (
+        {loading && (
           <div className="space-y-4 animate-pulse">
             <div className="bg-white rounded-xl h-48 border border-gray-100" />
             <div className="bg-white rounded-xl h-96 border border-gray-100" />
           </div>
         )}
 
-        {data && !loading && (
+        {product && !loading && (
           <div className="space-y-6">
-            {/* Recall alert */}
-            {product?.is_recalled && (
-              <div className="bg-red-600 text-white rounded-xl p-4 flex items-start gap-3">
-                <AlertTriangle className="w-5 h-5 flex-shrink-0 mt-0.5" />
-                <div>
-                  <p className="font-bold">PRODUCT RECALLED</p>
-                  <p className="text-sm text-red-100 mt-0.5">{data.recall?.reason || product.recall_reason}</p>
-                  {data.recall?.issued_by && <p className="text-xs text-red-200 mt-1">Issued by: {data.recall.issued_by} · {data.recall?.severity} severity</p>}
-                </div>
-              </div>
-            )}
-
-            {/* Expiry alert */}
-            {!product?.is_recalled && expired && (
+            {/* Expiry alerts */}
+            {expired && (
               <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-center gap-3">
                 <AlertTriangle className="w-5 h-5 text-red-500 flex-shrink-0" />
-                <p className="text-sm font-semibold text-red-700">This product has expired ({formatDate(product.expiry_date)})</p>
+                <p className="text-sm font-semibold text-red-700">
+                  This product has expired ({formatDate(product.expiry_date)})
+                </p>
               </div>
             )}
-            {!product?.is_recalled && expiringSoon && (
+            {!expired && expiringSoon && (
               <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-center gap-3">
                 <AlertTriangle className="w-5 h-5 text-amber-500 flex-shrink-0" />
-                <p className="text-sm font-semibold text-amber-700">Expiring soon: {formatDate(product.expiry_date)}</p>
+                <p className="text-sm font-semibold text-amber-700">
+                  Expiring soon: {formatDate(product.expiry_date)}
+                </p>
               </div>
             )}
 
             {/* Product card */}
             <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-              <div className={`h-1.5 bg-gradient-to-r ${product?.is_recalled ? 'from-red-500 to-red-400' : 'from-green-500 to-emerald-400'}`} />
+              <div className="h-1.5 bg-gradient-to-r from-green-500 to-emerald-400" />
               <div className="p-6">
-                <div className="flex gap-4 flex-wrap">
-                  {/* Product image */}
-                  {product?.image_url && (
-                    <img src={`http://${window.location.hostname}:8000${product.image_url}`}
-                      alt={product.name} className="w-24 h-24 rounded-xl object-cover border border-gray-100 flex-shrink-0" />
-                  )}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-start justify-between gap-4 flex-wrap">
-                      <div>
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <h2 className="text-xl font-bold text-gray-900">{product?.name}</h2>
-                          {product?.is_organic && <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-800"><Leaf className="w-3 h-3" /> Organic</span>}
-                          {product?.is_certified && <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800"><Award className="w-3 h-3" /> Certified</span>}
-                          {product?.is_recalled && <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-800"><AlertTriangle className="w-3 h-3" /> Recalled</span>}
-                        </div>
-                        <p className="text-gray-500 text-sm mt-1">{product?.product_type} · {product?.description}</p>
-                      </div>
-                      <div className="flex gap-2 flex-wrap flex-shrink-0">
-                        {canAddEvent && (
-                          <button onClick={() => setShowModal(true)}
-                            className="flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-white bg-green-600 hover:bg-green-700 rounded-lg">
-                            <Plus className="w-4 h-4" /> Event
-                          </button>
-                        )}
-                        <button onClick={handleExportCSV}
-                          className="flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg">
-                          <Download className="w-4 h-4" /> CSV
-                        </button>
-                        <button onClick={handleExportPDF}
-                          className="flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-red-700 bg-red-50 hover:bg-red-100 rounded-lg">
-                          <FileText className="w-4 h-4" /> PDF
-                        </button>
-                      </div>
+                <div className="flex items-start justify-between gap-4 flex-wrap mb-4">
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h2 className="text-xl font-bold text-gray-900">{product.name}</h2>
+                      {product.is_organic && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-800">
+                          <Leaf className="w-3 h-3" /> Organic
+                        </span>
+                      )}
+                      {product.is_certified && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800">
+                          <Award className="w-3 h-3" /> Certified
+                        </span>
+                      )}
                     </div>
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4">
-                      {[
-                        { icon: Hash, label: 'Batch', val: product?.batch_number, mono: true },
-                        { icon: User, label: 'Farmer', val: product?.farmer_name },
-                        { icon: MapPin, label: 'Farm', val: product?.farm_location },
-                        { icon: Calendar, label: 'Harvested', val: formatDate(product?.harvest_date) },
-                      ].map(({ icon: Icon, label, val, mono }) => (
-                        <div key={label} className="bg-gray-50 rounded-lg p-3">
-                          <div className="flex items-center gap-1.5 mb-1">
-                            <Icon className="w-3.5 h-3.5 text-gray-400" />
-                            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{label}</span>
-                          </div>
-                          <p className={`text-sm font-semibold text-gray-800 ${mono ? 'font-mono text-xs' : ''}`}>{val || '—'}</p>
-                        </div>
-                      ))}
-                    </div>
+                    <p className="text-gray-500 text-sm mt-1">
+                      {product.product_type}{product.description ? ` · ${product.description}` : ''}
+                    </p>
                   </div>
+                  <button
+                    onClick={handleExportPDF}
+                    className="flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-red-700 bg-red-50 hover:bg-red-100 rounded-lg"
+                  >
+                    <FileText className="w-4 h-4" /> Export PDF
+                  </button>
                 </div>
 
-                {/* Uploads */}
-                <div className="flex flex-wrap gap-2 mt-4 pt-4 border-t border-gray-50">
-                  <input ref={imageInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
-                  <input ref={certInputRef} type="file" accept=".pdf,image/*" className="hidden" onChange={handleCertUpload} />
-                  {canUploadImage && (
-                    <button onClick={() => imageInputRef.current?.click()}
-                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100">
-                      <Upload className="w-3.5 h-3.5" /> Upload Image
-                    </button>
-                  )}
-                  {canUploadCert && (
-                    <button onClick={() => certInputRef.current?.click()}
-                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded-lg hover:bg-amber-100">
-                      <Upload className="w-3.5 h-3.5" /> Upload Certificate
-                    </button>
-                  )}
-                  {product?.certificate_url && (
-                    <a href={`http://${window.location.hostname}:8000${product.certificate_url}`} target="_blank" rel="noreferrer"
-                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100">
-                      <Award className="w-3.5 h-3.5" /> View Certificate
-                    </a>
-                  )}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  {[
+                    { icon: Hash,     label: 'Batch',     val: product.batch_number,            mono: true },
+                    { icon: User,     label: 'Farmer',    val: product.farmer_name               },
+                    { icon: MapPin,   label: 'Farm',      val: product.farm_location             },
+                    { icon: Calendar, label: 'Harvested', val: formatDate(product.harvest_date)  },
+                  ].map(({ icon: Icon, label, val, mono }) => (
+                    <div key={label} className="bg-gray-50 rounded-lg p-3">
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <Icon className="w-3.5 h-3.5 text-gray-400" />
+                        <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{label}</span>
+                      </div>
+                      <p className={`text-sm font-semibold text-gray-800 ${mono ? 'font-mono text-xs' : ''}`}>
+                        {val || '—'}
+                      </p>
+                    </div>
+                  ))}
                 </div>
 
-                {product?.blockchain_tx_hash && (
-                  <div className="mt-3 flex items-center gap-2 text-xs text-gray-400 bg-gray-50 rounded-lg px-3 py-2">
-                    <Hash className="w-3.5 h-3.5" />
-                    <span className="font-mono break-all">{product.blockchain_tx_hash}</span>
-                    <span className="ml-auto flex-shrink-0 flex items-center gap-1 text-green-600 font-medium">
-                      <span className="w-1.5 h-1.5 bg-green-500 rounded-full" /> On-chain
-                    </span>
-                  </div>
-                )}
+                {/* On-chain proof */}
+                <div className="mt-4 flex items-center gap-2 text-xs text-gray-400 bg-gray-50 rounded-lg px-3 py-2">
+                  <Hash className="w-3.5 h-3.5 flex-shrink-0" />
+                  <span className="font-mono break-all">{product.farmer_address}</span>
+                  <span className="ml-auto flex-shrink-0 flex items-center gap-1 text-green-600 font-semibold">
+                    <span className="w-1.5 h-1.5 bg-green-500 rounded-full" /> On-chain
+                  </span>
+                </div>
               </div>
             </div>
 
@@ -460,38 +383,46 @@ export default function Track() {
                   <div className="flex border-b border-gray-100">
                     {TABS.map(({ id, label, icon: Icon }) => (
                       <button key={id} onClick={() => setActiveTab(id)}
-                        className={`flex items-center gap-2 px-5 py-3.5 text-sm font-semibold transition-colors ${activeTab === id ? 'text-green-700 border-b-2 border-green-600 bg-green-50/50' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'}`}>
+                        className={`flex items-center gap-2 px-5 py-3.5 text-sm font-semibold transition-colors ${
+                          activeTab === id
+                            ? 'text-green-700 border-b-2 border-green-600 bg-green-50/50'
+                            : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+                        }`}>
                         <Icon className="w-4 h-4" /> {label}
                       </button>
                     ))}
                   </div>
                   <div className="p-6">
-                    {activeTab === 'timeline' && <Timeline events={data.events || []} />}
-                    {activeTab === 'coldchain' && <ColdChainChart events={data.events || []} />}
-                    {activeTab === 'map' && <SupplyChainMap events={data.events || []} product={product} />}
+                    {activeTab === 'timeline'  && <Timeline events={events} />}
+                    {activeTab === 'coldchain' && <ColdChainChart events={events} />}
+                    {activeTab === 'map'       && <SupplyChainMap events={events} product={product} />}
                   </div>
                 </div>
               </div>
 
+              {/* QR Code */}
               <div className="space-y-4">
                 <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5 text-center">
                   <h3 className="text-sm font-bold text-gray-700 mb-4">Consumer QR Code</h3>
                   <div className="flex justify-center mb-4">
                     <div className="p-3 bg-white border-2 border-green-200 rounded-xl shadow-inner">
-                      {data.qr_code_url
-                        ? <img src={data.qr_code_url} alt="QR Code" width={160} height={160} />
-                        : <QRCodeSVG value={verifyUrl} size={160} fgColor="#15803d" level="H" />
-                      }
+                      <QRCodeSVG value={verifyUrl} size={160} fgColor="#15803d" level="H" />
                     </div>
                   </div>
-                  <p className="text-xs text-gray-500 mb-3 break-all font-mono bg-gray-50 p-2 rounded-lg">{verifyUrl}</p>
-                  <button onClick={() => { navigator.clipboard.writeText(verifyUrl); toast.success('URL copied!'); }}
-                    className="w-full py-2 text-xs font-semibold text-green-700 bg-green-50 border border-green-200 rounded-lg hover:bg-green-100">
+                  <p className="text-xs text-gray-500 mb-3 break-all font-mono bg-gray-50 p-2 rounded-lg">
+                    {verifyUrl}
+                  </p>
+                  <button
+                    onClick={() => { navigator.clipboard.writeText(verifyUrl); toast.success('URL copied!'); }}
+                    className="w-full py-2 text-xs font-semibold text-green-700 bg-green-50 border border-green-200 rounded-lg hover:bg-green-100"
+                  >
                     Copy Verify URL
                   </button>
                 </div>
-                <button onClick={() => navigate(`/verify/${product?.id}`)}
-                  className="w-full flex items-center justify-center gap-2 py-3 text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-sm">
+                <button
+                  onClick={() => navigate(`/verify/${product.id}`)}
+                  className="w-full flex items-center justify-center gap-2 py-3 text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-sm"
+                >
                   <ExternalLink className="w-4 h-4" /> Open Consumer View
                 </button>
               </div>
@@ -499,20 +430,18 @@ export default function Track() {
           </div>
         )}
 
-        {!data && !loading && !error && (
+        {!product && !loading && !error && (
           <div className="text-center py-20">
             <div className="w-16 h-16 bg-green-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
               <Package className="w-8 h-8 text-green-600" />
             </div>
             <h3 className="text-lg font-bold text-gray-700 mb-2">Search for a product</h3>
-            <p className="text-gray-400 text-sm max-w-sm mx-auto">Enter a product ID or batch number to retrieve its full blockchain traceability history</p>
+            <p className="text-gray-400 text-sm max-w-sm mx-auto">
+              Enter a product ID or batch number to retrieve its full blockchain traceability history
+            </p>
           </div>
         )}
       </div>
-
-      {showModal && (
-        <EventModal productId={data?.product?.id} onClose={() => setShowModal(false)} onSuccess={() => load(data?.product?.id)} />
-      )}
     </div>
   );
 }

@@ -6,26 +6,29 @@ export const useRole = (account) => {
   const [role, setRole] = useState(null);
   const [roleName, setRoleName] = useState('NONE');
   const [isActive, setIsActive] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
-  const { getUserRegistry } = useContract();
+  const { getAgroChain } = useContract();
 
   useEffect(() => {
     const fetchRole = async () => {
       if (!account) { setLoading(false); return; }
       try {
-        const registry = getUserRegistry();
-        const [userRole, active] = await Promise.all([
-          registry.userRoles(account),
-          registry.isActive(account),
+        const contract = getAgroChain();
+        const [actor, adminAddress] = await Promise.all([
+          contract.getActor(account),
+          contract.admin(),
         ]);
-        const roleNum = parseInt(userRole.toString());
+        const roleNum = parseInt(actor.role.toString());
         setRole(roleNum);
         setRoleName(ROLES[roleNum] || 'NONE');
-        setIsActive(active);
+        setIsActive(actor.isActive);
+        setIsAdmin(adminAddress.toLowerCase() === account.toLowerCase());
       } catch (err) {
         console.error('Role fetch failed:', err);
         setRoleName('NONE');
         setIsActive(false);
+        setIsAdmin(false);
       } finally {
         setLoading(false);
       }
@@ -33,5 +36,5 @@ export const useRole = (account) => {
     fetchRole();
   }, [account]);
 
-  return { role, roleName, isActive, loading };
+  return { role, roleName, isActive, isAdmin, loading };
 };

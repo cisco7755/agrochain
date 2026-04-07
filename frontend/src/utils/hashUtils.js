@@ -33,9 +33,9 @@ export const toUnixTimestamp = (dateString) => {
 };
 
 export const etherscanTxUrl = (txHash) => {
-  return `https://sepolia.etherscan.io/tx/${txHash}`;
+  return `https://www.oklink.com/amoy/tx/${txHash}`;
 };
 
 export const etherscanAddressUrl = (address) => {
-  return `https://sepolia.etherscan.io/address/${address}`;
+  return `https://www.oklink.com/amoy/address/${address}`;
 };

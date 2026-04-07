@@ -6,12 +6,12 @@ import toast from 'react-hot-toast';
 const ConfirmPickup = ({ batchHash, onDone }) => {
   const [loading, setLoading] = useState(false);
   const [txHash, setTxHash] = useState(null);
-  const { getProductTrace } = useContract();
+  const { getAgroChain } = useContract();
 
   const handlePickup = async () => {
     try {
       setLoading(true); setTxHash(null);
-      const trace = getProductTrace(true);
+      const trace = getAgroChain(true);
       const toastId = toast.loading('Waiting for MetaMask confirmation...');
       const tx = await trace.confirmPickup(batchHash);
       toast.loading('Recording pickup on blockchain...', { id: toastId });

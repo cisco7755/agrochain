@@ -2,11 +2,12 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import {
-  Leaf, MapPin, User, Calendar, Hash, FileText,
+  Leaf, MapPin, Calendar, Hash, FileText,
   Package, ChevronRight, CheckCircle, Info, Loader2,
 } from 'lucide-react';
-import { createProduct } from '../services/api';
 import { useAuth } from '../context/AuthContext';
+import { useContract } from '../hooks/useContract';
+import { toUnixTimestamp } from '../utils/hashUtils';
 
 const PRODUCT_TYPES = ['Vegetables', 'Fruits', 'Grains', 'Dairy', 'Meat', 'Other'];
 
@@ -62,20 +63,21 @@ function Select({ children, ...props }) {
 export default function Register() {
   const navigate = useNavigate();
   const { user, isAuthenticated } = useAuth();
+  const { getAgroChain } = useContract();
   const canRegister = isAuthenticated && (user?.role === 'ADMIN' || user?.role === 'FARMER');
+
   const [submitting, setSubmitting] = useState(false);
+  const [txHash, setTxHash] = useState(null);
+  const [productId, setProductId] = useState(null);
   const [form, setForm] = useState({
     name: '',
     product_type: 'Vegetables',
     batch_number: generateBatch(),
     farm_location: '',
-    farm_size_acres: '',
     harvest_date: today(),
     expiry_date: '',
     is_organic: true,
     description: '',
-    farmer_name: '',
-    farmer_address: '',
   });
 
   const set = (field) => (e) => {
@@ -85,26 +87,59 @@ export default function Register() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!form.name || !form.batch_number || !form.farm_location || !form.farmer_name) {
+    if (!form.name || !form.batch_number || !form.farm_location) {
       toast.error('Please fill in all required fields');
       return;
     }
+    if (form.expiry_date && new Date(form.expiry_date) <= new Date(form.harvest_date)) {
+      toast.error('Expiry date must be after harvest date');
+      return;
+    }
+
     setSubmitting(true);
+    setTxHash(null);
+    setProductId(null);
+
     try {
-      const payload = {
-        ...form,
-        farm_size_acres: form.farm_size_acres ? parseFloat(form.farm_size_acres) : null,
-        harvest_date: form.harvest_date || null,
-        expiry_date: form.expiry_date || null,
-      };
-      const product = await createProduct(payload);
-      toast.success(
-        `Product registered! ID: #${product.id} · TX: ${product.blockchain_tx_hash?.slice(0, 10)}…`,
-        { duration: 6000 }
+      const contract = getAgroChain(true); // with signer
+      const harvestTs = toUnixTimestamp(form.harvest_date);
+      const expiryTs = form.expiry_date ? toUnixTimestamp(form.expiry_date) : harvestTs + 365 * 24 * 3600;
+
+      const toastId = toast.loading('Waiting for MetaMask confirmation…');
+      const tx = await contract.registerProduct(
+        form.name.trim(),
+        form.product_type,
+        form.batch_number.trim(),
+        form.farm_location.trim(),
+        form.is_organic,
+        harvestTs,
+        expiryTs,
+        form.description.trim(),
       );
-      navigate(`/track/${product.id}`);
+
+      toast.loading('Recording product on blockchain…', { id: toastId });
+      const receipt = await tx.wait();
+
+      const event = receipt.events?.find((e) => e.event === 'ProductRegistered');
+      const id = event?.args?.productId?.toNumber();
+
+      toast.success(
+        `Product registered! ID: #${id ?? '?'} · TX: ${receipt.transactionHash.slice(0, 10)}…`,
+        { id: toastId, duration: 6000 },
+      );
+
+      setTxHash(receipt.transactionHash);
+      if (id !== undefined) setProductId(id);
+
+      setForm({
+        name: '', product_type: 'Vegetables', batch_number: generateBatch(),
+        farm_location: '', harvest_date: today(), expiry_date: '', is_organic: true, description: '',
+      });
     } catch (err) {
-      toast.error(err.message || 'Registration failed');
+      if (err.code === 4001) toast.error('Transaction rejected in MetaMask.');
+      else if (err.message?.includes('batch number already registered')) toast.error('Batch number already exists. Use a unique batch number.');
+      else toast.error(err.message || 'Registration failed');
+      console.error(err);
     } finally {
       setSubmitting(false);
     }
@@ -119,13 +154,11 @@ export default function Register() {
           </div>
           <h2 className="text-xl font-bold text-gray-900 mb-2">Access Restricted</h2>
           <p className="text-gray-500 text-sm mb-6">
-            {isAuthenticated
-              ? 'Only Farmers and Admins can register products.'
-              : 'Please sign in with a Farmer or Admin account to register products.'}
+            Only Farmers and Admins can register products. Your wallet role is: <strong>{user?.role || 'VIEWER'}</strong>
           </p>
-          <button onClick={() => navigate(isAuthenticated ? '/dashboard' : '/login')}
+          <button onClick={() => navigate('/dashboard')}
             className="px-6 py-2.5 bg-green-600 text-white font-semibold text-sm rounded-xl hover:bg-green-700">
-            {isAuthenticated ? 'Go to Dashboard' : 'Sign In'}
+            Go to Dashboard
           </button>
         </div>
       </div>
@@ -200,12 +233,14 @@ export default function Register() {
 
                   <div>
                     <FieldLabel required>Harvest Date</FieldLabel>
-                    <Input type="date" value={form.harvest_date} onChange={set('harvest_date')} required />
+                    <Input type="date" value={form.harvest_date} onChange={set('harvest_date')} required
+                      max={today()} />
                   </div>
 
                   <div>
                     <FieldLabel>Expiry Date</FieldLabel>
-                    <Input type="date" value={form.expiry_date} onChange={set('expiry_date')} />
+                    <Input type="date" value={form.expiry_date} onChange={set('expiry_date')}
+                      min={form.harvest_date || today()} />
                   </div>
 
                   <div className="sm:col-span-2">
@@ -249,64 +284,39 @@ export default function Register() {
                   <h2 className="text-base font-bold text-gray-900">Farm Details</h2>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="sm:col-span-2">
-                    <FieldLabel required>Farm Location</FieldLabel>
-                    <Input
-                      placeholder="e.g. Nairobi, Kenya"
-                      value={form.farm_location}
-                      onChange={set('farm_location')}
-                      required
-                    />
-                  </div>
-                  <div>
-                    <FieldLabel>Farm Size (acres)</FieldLabel>
-                    <Input
-                      type="number"
-                      placeholder="e.g. 12.5"
-                      min="0"
-                      step="0.1"
-                      value={form.farm_size_acres}
-                      onChange={set('farm_size_acres')}
-                    />
-                  </div>
+                <div>
+                  <FieldLabel required>Farm Location</FieldLabel>
+                  <Input
+                    placeholder="e.g. Nairobi, Kenya"
+                    value={form.farm_location}
+                    onChange={set('farm_location')}
+                    required
+                  />
                 </div>
               </div>
 
-              {/* Farmer Info */}
-              <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
-                <div className="flex items-center gap-2 mb-5">
-                  <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center">
-                    <User className="w-4 h-4 text-blue-700" />
-                  </div>
-                  <h2 className="text-base font-bold text-gray-900">Farmer Information</h2>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Success info */}
+              {productId !== null && (
+                <div className="bg-green-50 border border-green-200 rounded-xl p-4 flex items-start gap-3">
+                  <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
                   <div>
-                    <FieldLabel required>Farmer Name</FieldLabel>
-                    <Input
-                      placeholder="e.g. Green Valley Farms"
-                      value={form.farmer_name}
-                      onChange={set('farmer_name')}
-                      required
-                    />
-                  </div>
-                  <div>
-                    <FieldLabel>Ethereum Address</FieldLabel>
-                    <Input
-                      placeholder="0x1234...abcd"
-                      value={form.farmer_address}
-                      onChange={set('farmer_address')}
-                    />
+                    <p className="text-sm font-bold text-green-800">Product registered on blockchain!</p>
+                    <p className="text-xs text-green-700 mt-0.5">Product ID: <span className="font-mono font-bold">#{productId}</span></p>
+                    {txHash && (
+                      <p className="text-xs text-green-600 font-mono mt-0.5 break-all">TX: {txHash}</p>
+                    )}
+                    <button type="button" onClick={() => navigate(`/track/${productId}`)}
+                      className="mt-2 text-xs font-semibold text-green-700 underline">
+                      Track this product →
+                    </button>
                   </div>
                 </div>
-              </div>
+              )}
 
               <button
                 type="submit"
                 disabled={submitting}
-                className="w-full flex items-center justify-center gap-2 py-3.5 px-6 bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white font-bold text-base rounded-xl shadow-green transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2"
+                className="w-full flex items-center justify-center gap-2 py-3.5 px-6 bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white font-bold text-base rounded-xl shadow-sm transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2"
               >
                 {submitting ? (
                   <><Loader2 className="w-5 h-5 animate-spin" /> Registering on Blockchain…</>
@@ -343,8 +353,8 @@ export default function Register() {
                       <p className="font-semibold text-gray-700 mt-0.5">{form.farm_location || '—'}</p>
                     </div>
                     <div>
-                      <p className="text-xs text-gray-400 font-medium">Farmer</p>
-                      <p className="font-semibold text-gray-700 mt-0.5">{form.farmer_name || '—'}</p>
+                      <p className="text-xs text-gray-400 font-medium">Wallet</p>
+                      <p className="font-mono font-semibold text-gray-700 mt-0.5 text-xs truncate">{user?.address ? `${user.address.slice(0, 8)}…` : '—'}</p>
                     </div>
                   </div>
 
@@ -358,7 +368,7 @@ export default function Register() {
                     <div className="flex items-start gap-2 text-xs text-gray-500 bg-green-50 rounded-lg p-3">
                       <Info className="w-4 h-4 text-green-600 flex-shrink-0 mt-0.5" />
                       <span>
-                        Upon submission, this product will be registered on the Polygon Amoy Testnet with an immutable blockchain record and a unique transaction hash.
+                        This product will be registered on-chain via your connected wallet. MetaMask will prompt you to confirm the transaction.
                       </span>
                     </div>
                   </div>

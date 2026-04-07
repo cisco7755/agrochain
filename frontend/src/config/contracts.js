@@ -1,15 +1,10 @@
-import UserRegistryABI from '../abis/UserRegistry.json';
-import ProductTraceABI from '../abis/ProductTrace.json';
+import AgroChainABI from '../abis/AgroChain.json';
 
 export const CONTRACT_CONFIG = {
-  userRegistry: {
-    address: import.meta.env.VITE_USER_REGISTRY_ADDRESS || '',
-    abi: UserRegistryABI,
+  agroChain: {
+    address: import.meta.env.VITE_AGROCHAIN_ADDRESS || '',
+    abi: AgroChainABI,
   },
-  productTrace: {
-    address: import.meta.env.VITE_PRODUCT_TRACE_ADDRESS || '',
-    abi: ProductTraceABI,
-  },
-  chainId: parseInt(import.meta.env.VITE_CHAIN_ID || '11155111'),
-  networkName: import.meta.env.VITE_NETWORK_NAME || 'sepolia',
+  chainId: parseInt(import.meta.env.VITE_CHAIN_ID || '80002'),
+  networkName: import.meta.env.VITE_NETWORK_NAME || 'amoy',
 };

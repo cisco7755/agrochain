@@ -2,27 +2,34 @@ import { useState } from 'react';
 import { Link, NavLink, useNavigate } from 'react-router-dom';
 import {
   Leaf, LayoutDashboard, PlusCircle, Search, Users,
-  Menu, X, ShieldAlert, Info, LogIn, LogOut,
+  Menu, X, ShieldAlert, Info, LogOut, Wallet, User,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useWallet } from '../hooks/useWallet';
 import toast from 'react-hot-toast';
 
-const PUBLIC_LINKS = [
+// Links visible to all authenticated users
+const BASE_LINKS = [
   { to: '/', label: 'Home', exact: true },
-  { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/track', label: 'Track', icon: Search },
-  { to: '/recalls', label: 'Recalls', icon: ShieldAlert },
   { to: '/about', label: 'About', icon: Info },
 ];
 
-const ADMIN_LINKS = [
-  { to: '/register', label: 'Register', icon: PlusCircle },
-  { to: '/actors', label: 'Actors', icon: Users },
-];
-
-const FARMER_LINKS = [
-  { to: '/register', label: 'Register', icon: PlusCircle },
-];
+// Role-specific extra links
+const ROLE_LINKS = {
+  ADMIN:       [
+    { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { to: '/register', label: 'Register', icon: PlusCircle },
+    { to: '/actors', label: 'Actors', icon: Users },
+    { to: '/recalls', label: 'Recalls', icon: ShieldAlert },
+  ],
+  FARMER:      [{ to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard }, { to: '/register', label: 'Register', icon: PlusCircle }],
+  PROCESSOR:   [{ to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard }],
+  DISTRIBUTOR: [{ to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard }],
+  RETAILER:    [{ to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard }],
+  CERTIFIER:   [{ to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard }],
+  VIEWER:      [],
+};
 
 const ROLE_COLORS = {
   ADMIN: 'bg-purple-100 text-purple-700',
@@ -30,6 +37,7 @@ const ROLE_COLORS = {
   CERTIFIER: 'bg-amber-100 text-amber-700',
   DISTRIBUTOR: 'bg-blue-100 text-blue-700',
   RETAILER: 'bg-pink-100 text-pink-700',
+  PROCESSOR: 'bg-indigo-100 text-indigo-700',
   VIEWER: 'bg-gray-100 text-gray-600',
 };
 
@@ -37,11 +45,12 @@ export default function Navbar() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const navigate = useNavigate();
-  const { user, logout, isAuthenticated } = useAuth();
+  const { user, logout } = useAuth();
+  const { disconnectWallet } = useWallet();
 
   const role = user?.role;
-  const extraLinks = role === 'ADMIN' ? ADMIN_LINKS : role === 'FARMER' ? FARMER_LINKS : [];
-  const navLinks = [...PUBLIC_LINKS, ...extraLinks].sort((a, b) => {
+  const roleExtra = ROLE_LINKS[role] || [];
+  const navLinks = [...BASE_LINKS, ...roleExtra].sort((a, b) => {
     const order = ['/', '/dashboard', '/register', '/track', '/recalls', '/actors', '/about'];
     return order.indexOf(a.to) - order.indexOf(b.to);
   });
@@ -51,12 +60,18 @@ export default function Navbar() {
       ? 'flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold text-green-700 bg-green-50'
       : 'flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 hover:text-green-700 hover:bg-green-50 transition-all';
 
-  const handleLogout = () => {
+  const handleDisconnect = () => {
+    disconnectWallet(); // sets localStorage flag
     logout();
     setUserMenuOpen(false);
-    toast.success('Signed out');
-    navigate('/');
+    setMenuOpen(false);
+    window.location.reload(); // reload so AppContent sees the disconnected state
   };
+
+  // Shorten wallet address for display
+  const shortAddr = user?.address
+    ? `${user.address.slice(0, 6)}…${user.address.slice(-4)}`
+    : user?.name || '';
 
   return (
     <nav className="sticky top-0 z-50 bg-white border-b border-gray-100 shadow-sm">
@@ -78,42 +93,42 @@ export default function Navbar() {
             ))}
           </div>
 
+          {/* Wallet info */}
           <div className="hidden lg:flex items-center gap-3">
-            {isAuthenticated ? (
-              <div className="relative">
-                <button onClick={() => setUserMenuOpen((v) => !v)}
-                  className="flex items-center gap-2 px-3 py-2 rounded-xl hover:bg-gray-50 transition-colors border border-gray-100">
-                  <div className="w-7 h-7 bg-green-600 rounded-full flex items-center justify-center text-white text-xs font-bold">
-                    {user?.name?.charAt(0).toUpperCase()}
+            <div className="relative">
+              <button
+                onClick={() => setUserMenuOpen((v) => !v)}
+                className="flex items-center gap-2 px-3 py-2 rounded-xl hover:bg-gray-50 transition-colors border border-gray-100"
+              >
+                <div className="w-7 h-7 bg-green-600 rounded-full flex items-center justify-center">
+                  <Wallet className="w-3.5 h-3.5 text-white" />
+                </div>
+                <div className="text-left">
+                  <p className="text-xs font-semibold text-gray-800 leading-tight font-mono">{shortAddr}</p>
+                  <span className={`text-xs px-1.5 py-0.5 rounded font-semibold ${ROLE_COLORS[role] || ROLE_COLORS.VIEWER}`}>
+                    {role || 'VIEWER'}
+                  </span>
+                </div>
+              </button>
+              {userMenuOpen && (
+                <div className="absolute right-0 mt-1 w-48 bg-white rounded-xl border border-gray-100 shadow-lg py-1 z-50">
+                  <div className="px-4 py-2 border-b border-gray-50">
+                    <p className="text-xs text-gray-500 font-semibold">{user?.name}</p>
+                    <p className="text-xs text-gray-400 font-mono truncate">{user?.address?.slice(0, 20)}…</p>
                   </div>
-                  <div className="text-left">
-                    <p className="text-xs font-semibold text-gray-800 leading-tight">{user?.name}</p>
-                    <span className={`text-xs px-1.5 py-0.5 rounded font-semibold ${ROLE_COLORS[user?.role] || ROLE_COLORS.VIEWER}`}>
-                      {user?.role}
-                    </span>
-                  </div>
-                </button>
-                {userMenuOpen && (
-                  <div className="absolute right-0 mt-1 w-44 bg-white rounded-xl border border-gray-100 shadow-lg py-1 z-50">
-                    <button onClick={handleLogout}
-                      className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50">
-                      <LogOut className="w-4 h-4" /> Sign Out
-                    </button>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <>
-                <Link to="/login"
-                  className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-green-700 border border-green-200 rounded-xl hover:bg-green-50 transition-colors">
-                  <LogIn className="w-4 h-4" /> Sign In
-                </Link>
-                <Link to="/signup"
-                  className="flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-white bg-green-600 hover:bg-green-700 rounded-xl shadow-sm">
-                  <PlusCircle className="w-4 h-4" /> Register
-                </Link>
-              </>
-            )}
+                  <Link to="/profile" onClick={() => setUserMenuOpen(false)}
+                    className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50">
+                    <User className="w-4 h-4" /> View Profile
+                  </Link>
+                  <button
+                    onClick={handleDisconnect}
+                    className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50"
+                  >
+                    <LogOut className="w-4 h-4" /> Disconnect
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
 
           <button onClick={() => setMenuOpen((v) => !v)} className="lg:hidden p-2 rounded-lg hover:bg-gray-100">
@@ -132,21 +147,14 @@ export default function Navbar() {
             </NavLink>
           ))}
           <div className="pt-2 border-t border-gray-100">
-            {isAuthenticated ? (
-              <div>
-                <p className="px-3 py-1 text-xs text-gray-500"><strong>{user?.name}</strong> · {user?.role}</p>
-                <button onClick={handleLogout} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg">
-                  <LogOut className="w-4 h-4" /> Sign Out
-                </button>
-              </div>
-            ) : (
-              <div className="flex gap-2 mt-1">
-                <Link to="/login" onClick={() => setMenuOpen(false)}
-                  className="flex-1 text-center py-2.5 text-sm font-semibold text-green-700 border border-green-200 rounded-xl">Sign In</Link>
-                <Link to="/signup" onClick={() => setMenuOpen(false)}
-                  className="flex-1 text-center py-2.5 text-sm font-bold text-white bg-green-600 rounded-xl">Register</Link>
-              </div>
-            )}
+            <p className="px-3 py-1 text-xs text-gray-500 font-mono">{shortAddr} · <span className={`px-1.5 py-0.5 rounded text-xs font-semibold ${ROLE_COLORS[role] || ROLE_COLORS.VIEWER}`}>{role}</span></p>
+            <Link to="/profile" onClick={() => setMenuOpen(false)}
+              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-lg">
+              <User className="w-4 h-4" /> View Profile
+            </Link>
+            <button onClick={handleDisconnect} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg">
+              <LogOut className="w-4 h-4" /> Disconnect Wallet
+            </button>
           </div>
         </div>
       )}

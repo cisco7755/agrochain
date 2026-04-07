@@ -8,27 +8,24 @@ import { shortenAddress } from '../../utils/hashUtils';
 
 const FarmerDashboard = ({ account }) => {
   const [activeTab, setActiveTab] = useState('farm');
-  const [farmId, setFarmId] = useState(null);
-  const [farmInfo, setFarmInfo] = useState(null);
-  const { getProductTrace } = useContract();
+  const [actor, setActor] = useState(null);
+  const { getAgroChain } = useContract();
 
-  const loadFarm = async () => {
-    if (!account) return;
-    try {
-      const trace = getProductTrace();
-      const result = await trace.getFarmByFarmer(account);
-      if (result.exists) {
-        setFarmId(result.farmId.toNumber());
-        setFarmInfo({ name: result.name, location: result.location });
-      }
-    } catch {}
-  };
-
-  useEffect(() => { loadFarm(); }, [account]);
+  useEffect(() => {
+    const load = async () => {
+      if (!account) return;
+      try {
+        const contract = getAgroChain();
+        const data = await contract.getActor(account);
+        setActor(data);
+      } catch {}
+    };
+    load();
+  }, [account]);
 
   const tabs = [
     { id: 'farm', label: 'My Farm', icon: Home },
-    { id: 'create', label: 'New Batch', icon: Plus },
+    { id: 'create', label: 'New Product', icon: Plus },
     { id: 'history', label: 'History', icon: History },
   ];
 
@@ -42,7 +39,7 @@ const FarmerDashboard = ({ account }) => {
             </div>
             <div>
               <h1 className="text-lg font-bold text-gray-900">
-                {farmInfo ? farmInfo.name : 'Farmer Dashboard'}
+                {actor?.name || 'Farmer Dashboard'}
               </h1>
               <p className="text-xs text-gray-500 font-mono">{shortenAddress(account)}</p>
             </div>
@@ -52,12 +49,12 @@ const FarmerDashboard = ({ account }) => {
       </header>
 
       <div className="max-w-4xl mx-auto px-4 py-6">
-        {farmInfo && (
+        {actor?.location && (
           <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6 flex items-center gap-3">
             <Sprout className="w-5 h-5 text-green-600 flex-shrink-0" />
             <div>
-              <p className="text-sm font-semibold text-green-800">{farmInfo.name}</p>
-              <p className="text-xs text-green-600">{farmInfo.location} · Farm ID: {farmId}</p>
+              <p className="text-sm font-semibold text-green-800">{actor.name}</p>
+              <p className="text-xs text-green-600">{actor.location}</p>
             </div>
           </div>
         )}
@@ -73,30 +70,8 @@ const FarmerDashboard = ({ account }) => {
           ))}
         </div>
 
-        {activeTab === 'farm' && (
-          farmInfo ? (
-            <div className="bg-white rounded-lg shadow p-6">
-              <h2 className="text-xl font-bold mb-4 text-gray-800">Farm Details</h2>
-              <div className="space-y-3">
-                <div className="flex justify-between border-b pb-2">
-                  <span className="text-gray-500 text-sm">Farm Name</span>
-                  <span className="font-medium text-sm">{farmInfo.name}</span>
-                </div>
-                <div className="flex justify-between border-b pb-2">
-                  <span className="text-gray-500 text-sm">Location</span>
-                  <span className="font-medium text-sm">{farmInfo.location}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-500 text-sm">Farm ID</span>
-                  <span className="font-mono text-sm">{farmId}</span>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <RegisterFarm onFarmRegistered={loadFarm} />
-          )
-        )}
-        {activeTab === 'create' && <CreateBatch farmId={farmId} />}
+        {activeTab === 'farm' && <RegisterFarm account={account} />}
+        {activeTab === 'create' && <CreateBatch actorLocation={actor?.location} />}
         {activeTab === 'history' && <BatchHistory account={account} />}
       </div>
     </div>

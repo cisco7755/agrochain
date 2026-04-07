@@ -7,13 +7,13 @@ const ReceiveProduct = ({ onDone }) => {
   const [batchHash, setBatchHash] = useState('');
   const [loading, setLoading] = useState(false);
   const [txHash, setTxHash] = useState(null);
-  const { getProductTrace } = useContract();
+  const { getAgroChain } = useContract();
 
   const handleReceipt = async () => {
     if (!batchHash.trim()) { toast.error('Please enter the batch hash'); return; }
     try {
       setLoading(true); setTxHash(null);
-      const trace = getProductTrace(true);
+      const trace = getAgroChain(true);
       const toastId = toast.loading('Waiting for MetaMask confirmation...');
       const tx = await trace.confirmReceipt(batchHash.trim());
       toast.loading('Recording receipt on blockchain...', { id: toastId });

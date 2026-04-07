@@ -1,27 +1,28 @@
+import { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { AuthProvider } from './context/AuthContext';
 import { ContractProvider } from './context/ContractContext';
 import ErrorBoundary from './components/ErrorBoundary';
-
+import { useAuth } from './context/AuthContext';
 import { useWallet } from './hooks/useWallet';
-import { useRole } from './hooks/useRole';
+import { useContract } from './hooks/useContract';
+import { shortenAddress } from './utils/hashUtils';
 
 import WalletConnect from './components/shared/WalletConnect';
 import LoadingSpinner from './components/shared/LoadingSpinner';
-import NotAuthorised from './pages/NotAuthorised';
+import ProtectedRoute from './components/shared/ProtectedRoute';
 
-import AdminDashboard from './components/admin/AdminDashboard';
-import FarmerDashboard from './components/farmer/FarmerDashboard';
-import CertifierDashboard from './components/certifier/CertifierDashboard';
-import DistributorDashboard from './components/distributor/DistributorDashboard';
-import RetailerDashboard from './components/retailer/RetailerDashboard';
-import ConsumerDashboard from './components/consumer/ConsumerDashboard';
-
-// Legacy public pages still accessible via URL
 import Navbar from './components/Navbar';
+import Home from './pages/Home';
+import Dashboard from './pages/Dashboard';
+import Register from './pages/Register';
+import Track from './pages/Track';
 import Verify from './pages/Verify';
+import Actors from './pages/Actors';
+import Recalls from './pages/Recalls';
 import About from './pages/About';
+import Profile from './pages/Profile';
 import NotFound from './pages/NotFound';
 
 const TOAST_OPTIONS = {
@@ -42,35 +43,100 @@ const TOAST_OPTIONS = {
   },
 };
 
-const PendingRegistration = ({ account }) => (
-  <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
-    <div className="bg-white rounded-2xl shadow-lg p-8 max-w-sm w-full text-center">
-      <div className="w-16 h-16 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-4">
-        <span className="text-3xl">⏳</span>
-      </div>
-      <h2 className="text-xl font-bold text-gray-900 mb-2">Pending Registration</h2>
-      <p className="text-gray-500 text-sm mb-4">
-        Your wallet is connected but has not been assigned a role yet. Please contact the AgroChain administrator to register your account.
-      </p>
-      <p className="text-xs font-mono bg-gray-100 rounded p-2 text-gray-600 break-all">{account}</p>
+const ROLE_NAMES = ['NONE', 'FARMER', 'PROCESSOR', 'DISTRIBUTOR', 'RETAILER', 'CERTIFIER'];
+
+function Layout() {
+  return (
+    <div className="min-h-screen flex flex-col bg-gray-50">
+      <Navbar />
+      <main className="flex-1">
+        <Routes>
+          {/* Public — any connected wallet */}
+          <Route path="/" element={<Home />} />
+          <Route path="/track" element={<Track />} />
+          <Route path="/track/:productId" element={<Track />} />
+          <Route path="/about" element={<About />} />
+          <Route path="/profile" element={<Profile />} />
+
+          {/* Any registered role (not VIEWER) */}
+          <Route path="/dashboard" element={
+            <ProtectedRoute allowedRoles={['FARMER','PROCESSOR','DISTRIBUTOR','RETAILER','CERTIFIER','ADMIN']}>
+              <Dashboard />
+            </ProtectedRoute>
+          } />
+
+          {/* FARMER + ADMIN only */}
+          <Route path="/register" element={
+            <ProtectedRoute allowedRoles={['FARMER', 'ADMIN']}>
+              <Register />
+            </ProtectedRoute>
+          } />
+
+          {/* ADMIN only */}
+          <Route path="/actors" element={
+            <ProtectedRoute allowedRoles={['ADMIN']}>
+              <Actors />
+            </ProtectedRoute>
+          } />
+          <Route path="/recalls" element={
+            <ProtectedRoute allowedRoles={['ADMIN']}>
+              <Recalls />
+            </ProtectedRoute>
+          } />
+
+          <Route path="*" element={<NotFound />} />
+        </Routes>
+      </main>
     </div>
-  </div>
-);
+  );
+}
 
-const ROLE_DASHBOARDS = {
-  ADMIN: AdminDashboard,
-  FARMER: FarmerDashboard,
-  CERTIFIER: CertifierDashboard,
-  DISTRIBUTOR: DistributorDashboard,
-  RETAILER: RetailerDashboard,
-  CONSUMER: ConsumerDashboard,
-};
+function AppContent() {
+  const { account, isConnected, isCorrectNetwork, error, loading, connectWallet, switchToSepolia } = useWallet();
+  const { login, logout } = useAuth();
+  const { getAgroChain } = useContract();
+  const [roleLoading, setRoleLoading] = useState(false);
 
-function BlockchainApp() {
-  const { account, isConnected, isCorrectNetwork, error, loading: walletLoading, connectWallet, switchToSepolia } = useWallet();
-  const { roleName, isActive, loading: roleLoading } = useRole(isConnected && isCorrectNetwork ? account : null);
+  useEffect(() => {
+    if (!isConnected || !isCorrectNetwork || !account) {
+      logout();
+      return;
+    }
 
-  if (walletLoading) return <LoadingSpinner message="Connecting to wallet..." />;
+    setRoleLoading(true);
+    const loadRole = async () => {
+      try {
+        const contract = getAgroChain();
+        const [actor, adminAddr] = await Promise.all([
+          contract.getActor(account),
+          contract.admin(),
+        ]);
+
+        const isAdmin = adminAddr.toLowerCase() === account.toLowerCase();
+
+        let role, name;
+        if (isAdmin) {
+          role = 'ADMIN';
+          name = actor.name || 'Admin';
+        } else {
+          const roleIndex = Number(actor.role);
+          role = roleIndex > 0 ? (ROLE_NAMES[roleIndex] || 'VIEWER') : 'VIEWER';
+          name = actor.name || shortenAddress(account);
+        }
+
+        login(null, { name, role, address: account });
+      } catch {
+        // Wallet connected but not registered in contract — still let them in as VIEWER
+        login(null, { name: shortenAddress(account), role: 'VIEWER', address: account });
+      } finally {
+        setRoleLoading(false);
+      }
+    };
+
+    loadRole();
+  }, [account, isConnected, isCorrectNetwork]);
+
+  if (loading || roleLoading) return <LoadingSpinner message="Loading wallet…" />;
 
   if (!isConnected || !isCorrectNetwork) {
     return (
@@ -84,16 +150,14 @@ function BlockchainApp() {
     );
   }
 
-  if (roleLoading) return <LoadingSpinner message="Fetching your role from blockchain..." />;
-
-  if (!isActive && roleName !== 'NONE') {
-    return <NotAuthorised account={account} roleName={roleName} />;
-  }
-
-  const Dashboard = ROLE_DASHBOARDS[roleName];
-  if (!Dashboard) return <PendingRegistration account={account} />;
-
-  return <Dashboard account={account} />;
+  return (
+    <Routes>
+      {/* Public consumer verify — no Navbar */}
+      <Route path="/verify/:productId" element={<Verify />} />
+      {/* Main app with Navbar */}
+      <Route path="/*" element={<Layout />} />
+    </Routes>
+  );
 }
 
 export default function App() {
@@ -102,18 +166,7 @@ export default function App() {
       <AuthProvider>
         <ContractProvider>
           <BrowserRouter>
-            <Routes>
-              {/* Public verification route — no wallet needed */}
-              <Route path="/verify/:productId" element={<Verify />} />
-              <Route path="/about" element={
-                <div className="min-h-screen flex flex-col bg-gray-50">
-                  <Navbar />
-                  <main className="flex-1"><About /></main>
-                </div>
-              } />
-              {/* All other routes → blockchain DApp */}
-              <Route path="/*" element={<BlockchainApp />} />
-            </Routes>
+            <AppContent />
             <Toaster position="top-right" toastOptions={TOAST_OPTIONS} />
           </BrowserRouter>
         </ContractProvider>

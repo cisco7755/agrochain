@@ -11,13 +11,13 @@ const GenerateQR = () => {
   const [qrPayload, setQrPayload] = useState(null);
   const [loading, setLoading] = useState(false);
   const [txHash, setTxHash] = useState(null);
-  const { getProductTrace } = useContract();
+  const { getAgroChain } = useContract();
 
   const handleList = async () => {
     if (!batchHash.trim()) { toast.error('Please enter the batch hash'); return; }
     try {
       setLoading(true); setTxHash(null); setQrPayload(null);
-      const trace = getProductTrace(true);
+      const trace = getAgroChain(true);
       const toastId = toast.loading('Waiting for MetaMask confirmation...');
       const tx = await trace.listForSale(batchHash.trim());
       toast.loading('Listing product on blockchain...', { id: toastId });

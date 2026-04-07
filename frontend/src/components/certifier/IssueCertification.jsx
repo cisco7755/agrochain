@@ -12,7 +12,7 @@ const IssueCertification = ({ batchHash, batchData, onDone }) => {
   const [rejectMode, setRejectMode] = useState(false);
   const [reason, setReason] = useState('');
   const [txHash, setTxHash] = useState(null);
-  const { getProductTrace } = useContract();
+  const { getAgroChain } = useContract();
   const { upload, uploading } = useIPFS();
 
   const handleCertify = async () => {
@@ -26,7 +26,7 @@ const IssueCertification = ({ batchHash, batchData, onDone }) => {
         toast.dismiss(id);
         if (cid) toast.success('Document uploaded');
       }
-      const trace = getProductTrace(true);
+      const trace = getAgroChain(true);
       const toastId = toast.loading('Waiting for MetaMask confirmation...');
       const tx = await trace.certifyBatch(batchHash, certId.trim(), cid || '');
       toast.loading('Recording certification on blockchain...', { id: toastId });
@@ -45,7 +45,7 @@ const IssueCertification = ({ batchHash, batchData, onDone }) => {
     if (!reason.trim()) { toast.error('Please provide a rejection reason'); return; }
     try {
       setLoading(true); setTxHash(null);
-      const trace = getProductTrace(true);
+      const trace = getAgroChain(true);
       const toastId = toast.loading('Waiting for MetaMask confirmation...');
       const tx = await trace.rejectBatch(batchHash, reason.trim());
       toast.loading('Recording rejection on blockchain...', { id: toastId });

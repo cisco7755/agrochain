@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { AlertTriangle, CheckCircle, Plus, X, Loader2, Package, Calendar, User, ShieldAlert } from 'lucide-react';
-import { getRecalls, issueRecall, resolveRecall, getProducts } from '../services/api';
+import { getRecalls, issueRecall, resolveRecall } from '../services/api';
 import { useAuth } from '../context/AuthContext';
+import { useContract } from '../hooks/useContract';
 
 const SEVERITY_CONFIG = {
   LOW: { color: 'bg-yellow-100 text-yellow-800 border-yellow-200', dot: 'bg-yellow-400', label: 'Low' },
@@ -21,6 +22,7 @@ function formatDate(d) {
 export default function Recalls() {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { getAgroChain } = useContract();
   const isAdmin = user?.role === 'ADMIN';
   const [recalls, setRecalls] = useState([]);
   const [products, setProducts] = useState([]);
@@ -31,9 +33,28 @@ export default function Recalls() {
 
   const load = async () => {
     try {
-      const [r, p] = await Promise.all([getRecalls(), getProducts()]);
+      const contract = getAgroChain();
+      const currentBlock = await contract.provider.getBlockNumber();
+      const fromBlock = Math.max(0, currentBlock - 100000);
+
+      const [r, registeredEvents] = await Promise.all([
+        getRecalls(),
+        contract.queryFilter(contract.filters.ProductRegistered(), fromBlock),
+      ]);
+
+      // Load product details from blockchain
+      const productDetails = await Promise.all(
+        registeredEvents.map(async (e) => {
+          const id = e.args.productId || e.args[0];
+          try {
+            const p = await contract.getProduct(id);
+            return { id: Number(p.productId), name: p.name, batch_number: p.batchNumber };
+          } catch { return null; }
+        }),
+      );
+
       setRecalls(r);
-      setProducts(p.filter((p) => !p.is_recalled));
+      setProducts(productDetails.filter(Boolean));
     } catch (err) { toast.error(err.message); }
     finally { setLoading(false); }
   };

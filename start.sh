@@ -9,6 +9,17 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 RESET='\033[0m'
 
+# ══════════════════════════════════════════════════════════════════════════════
+#  ADD ANY WALLET ADDRESSES YOU WANT AUTO-FUNDED WITH 10 TEST ETH BELOW
+#  These receive Hardhat local ETH every time you run ./start.sh
+# ══════════════════════════════════════════════════════════════════════════════
+FUND_ADDRESSES=(
+  "0x5d56b575bb0ec230f19655defd548a50d00bb8c0"
+  # "0xYourSecondAddressHere"
+)
+# ══════════════════════════════════════════════════════════════════════════════
+
+HARDHAT_PID=""
 BACKEND_PID=""
 FRONTEND_PID=""
 
@@ -16,6 +27,7 @@ cleanup() {
   echo -e "\n${YELLOW}Shutting down AgroChain...${RESET}"
   [ -n "$BACKEND_PID" ]  && kill "$BACKEND_PID"  2>/dev/null
   [ -n "$FRONTEND_PID" ] && kill "$FRONTEND_PID" 2>/dev/null
+  [ -n "$HARDHAT_PID" ]  && kill "$HARDHAT_PID"  2>/dev/null
   wait 2>/dev/null
   echo -e "${GREEN}All services stopped.${RESET}"
   exit 0
@@ -31,7 +43,7 @@ echo " ██║  ██║╚██████╔╝██║  ██║╚█
 echo " ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝ ╚═════╝  ╚═════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚═╝  ╚═══╝"
 echo -e "${RESET}"
 echo -e "${CYAN}  Decentralized Organic Food Supply Chain Traceability${RESET}"
-echo -e "${CYAN}  Powered by Ethereum Smart Contracts + Polygon Amoy Testnet${RESET}"
+echo -e "${CYAN}  Powered by Ethereum Smart Contracts${RESET}"
 echo ""
 
 # ── Detect local IP ────────────────────────────────────────────────────────────
@@ -41,30 +53,152 @@ LOCAL_IP=$(ipconfig getifaddr en0 2>/dev/null \
   || echo "localhost")
 
 FRONTEND_URL="http://${LOCAL_IP}:5173"
-BACKEND_URL="http://${LOCAL_IP}:8000"
 
-# ── Dependency checks ──────────────────────────────────────────────────────────
-echo -e "${BOLD}[0/2] Checking dependencies...${RESET}"
+# ══════════════════════════════════════════════════════════════════════════════
+# [0/5] Kill existing processes
+# ══════════════════════════════════════════════════════════════════════════════
+echo -e "${BOLD}[0/5] Killing existing processes...${RESET}"
 
-# Check required system tools
+for PORT in 5173 8000 8545; do
+  PIDS=$(lsof -ti tcp:$PORT 2>/dev/null)
+  if [ -n "$PIDS" ]; then
+    echo -e "${YELLOW}  ⚙ Stopping process on port $PORT...${RESET}"
+    echo "$PIDS" | xargs kill -9 2>/dev/null
+  fi
+done
+
+pkill -f "uvicorn app.main:app" 2>/dev/null
+pkill -f "hardhat node" 2>/dev/null
+pkill -f "vite" 2>/dev/null
+sleep 1
+echo -e "  ${GREEN}✓ Ports cleared (5173, 8000, 8545)${RESET}"
+echo ""
+
+# ══════════════════════════════════════════════════════════════════════════════
+# [1/5] Dependency checks
+# ══════════════════════════════════════════════════════════════════════════════
+echo -e "${BOLD}[1/5] Checking dependencies...${RESET}"
+
 for cmd in python3 node npm curl; do
   if ! command -v "$cmd" &>/dev/null; then
-    echo -e "${RED}  ✗ '$cmd' is not installed. Please install it and re-run.${RESET}"
+    echo -e "${RED}  ✗ '$cmd' not installed. Please install it and re-run.${RESET}"
     exit 1
   fi
 done
 echo -e "  ${GREEN}✓ System tools OK (python3, node, npm, curl)${RESET}"
 
-# ── Backend setup ──────────────────────────────────────────────────────────────
+# Install contracts npm deps if needed
+cd "$ROOT/contracts"
+if [ ! -d "node_modules" ]; then
+  echo -e "${YELLOW}  ⚙ Installing contract dependencies...${RESET}"
+  npm install --quiet
+  echo -e "  ${GREEN}✓ Contract dependencies installed${RESET}"
+else
+  echo -e "  ${GREEN}✓ Contract dependencies OK${RESET}"
+fi
 echo ""
-echo -e "${BOLD}[1/2] Setting up Backend (FastAPI)...${RESET}"
+
+# ══════════════════════════════════════════════════════════════════════════════
+# [2/5] Blockchain — Start Hardhat node + Deploy + Fund
+# ══════════════════════════════════════════════════════════════════════════════
+echo -e "${BOLD}[2/5] Starting Blockchain (Hardhat Local)...${RESET}"
+
+cd "$ROOT/contracts"
+
+# Start Hardhat node in background
+npx hardhat node > "$ROOT/hardhat.log" 2>&1 &
+HARDHAT_PID=$!
+
+# Wait for node to be ready
+echo -n "  Waiting for Hardhat node"
+for i in $(seq 1 30); do
+  sleep 0.5
+  if curl -s -X POST http://localhost:8545 \
+    -H "Content-Type: application/json" \
+    -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
+    > /dev/null 2>&1; then
+    echo -e "\r  ${GREEN}✓ Hardhat node running${RESET}  →  http://localhost:8545"
+    break
+  fi
+  echo -n "."
+  if [ "$i" -eq 30 ]; then
+    echo -e "\n  ${RED}✗ Hardhat node failed to start.${RESET}"
+    tail -5 "$ROOT/hardhat.log"
+    cleanup
+  fi
+done
+
+# Deploy contract
+echo -e "  ${YELLOW}⚙ Deploying AgroChain contract...${RESET}"
+DEPLOY_OUTPUT=$(npx hardhat run scripts/deploy.js --network localhost 2>&1)
+if [ $? -ne 0 ]; then
+  echo -e "  ${RED}✗ Deployment failed:${RESET}"
+  echo "$DEPLOY_OUTPUT" | tail -10
+  cleanup
+fi
+
+# Read contract address from deployments/latest.json
+CONTRACT_ADDRESS=$(node -e "
+  const f = require('./deployments/latest.json');
+  console.log(f.contractAddress);
+" 2>/dev/null)
+
+if [ -z "$CONTRACT_ADDRESS" ]; then
+  echo -e "  ${RED}✗ Could not read contract address from deployments/latest.json${RESET}"
+  cleanup
+fi
+
+echo -e "  ${GREEN}✓ Contract deployed${RESET}  →  ${CONTRACT_ADDRESS}"
+
+# Update frontend .env with new contract address
+ENV_FILE="$ROOT/frontend/.env"
+if [ -f "$ENV_FILE" ]; then
+  # Replace VITE_AGROCHAIN_ADDRESS line
+  sed -i '' "s|^VITE_AGROCHAIN_ADDRESS=.*|VITE_AGROCHAIN_ADDRESS=${CONTRACT_ADDRESS}|" "$ENV_FILE" 2>/dev/null \
+    || sed -i "s|^VITE_AGROCHAIN_ADDRESS=.*|VITE_AGROCHAIN_ADDRESS=${CONTRACT_ADDRESS}|" "$ENV_FILE"
+  echo -e "  ${GREEN}✓ frontend/.env updated with new contract address${RESET}"
+fi
+
+# Fund addresses
+if [ ${#FUND_ADDRESSES[@]} -gt 0 ]; then
+  echo -e "  ${YELLOW}⚙ Funding wallet addresses with test ETH...${RESET}"
+  for ADDR in "${FUND_ADDRESSES[@]}"; do
+    FUND_RESULT=$(node -e "
+      const { ethers } = require('hardhat');
+      async function main() {
+        const [deployer] = await ethers.getSigners();
+        const tx = await deployer.sendTransaction({
+          to: '${ADDR}',
+          value: ethers.parseEther ? ethers.parseEther('10.0') : ethers.utils.parseEther('10.0'),
+        });
+        await tx.wait();
+        const bal = await ethers.provider.getBalance('${ADDR}');
+        const fmt = ethers.formatEther ? ethers.formatEther : ethers.utils.formatEther;
+        console.log(fmt(bal));
+      }
+      main().catch(e => { console.error(e.message); process.exit(1); });
+    " 2>/dev/null)
+    if [ $? -eq 0 ]; then
+      echo -e "  ${GREEN}✓ Funded ${ADDR::10}…${ADDR: -4}  →  ${FUND_RESULT} ETH${RESET}"
+    else
+      echo -e "  ${YELLOW}⚠ Could not fund ${ADDR::10}…${ADDR: -4} (may already have balance)${RESET}"
+    fi
+  done
+fi
+
+echo ""
+
+# ══════════════════════════════════════════════════════════════════════════════
+# [3/5] Backend (FastAPI)
+# ══════════════════════════════════════════════════════════════════════════════
+echo -e "${BOLD}[3/5] Setting up Backend (FastAPI)...${RESET}"
 
 VENV="$ROOT/backend/venv/bin/activate"
 if [ ! -f "$VENV" ]; then
-  echo -e "${YELLOW}  ⚙ venv not found — creating virtual environment...${RESET}"
+  echo -e "${YELLOW}  ⚙ Creating virtual environment...${RESET}"
   python3 -m venv "$ROOT/backend/venv"
   if [ $? -ne 0 ]; then
-    echo -e "${RED}  ✗ Failed to create venv. Check your Python installation.${RESET}"
+    echo -e "${RED}  ✗ Failed to create venv.${RESET}"
     exit 1
   fi
   echo -e "  ${GREEN}✓ Virtual environment created${RESET}"
@@ -72,94 +206,93 @@ fi
 
 source "$VENV"
 
-# Install / sync Python packages
 if [ -f "$ROOT/backend/requirements.txt" ]; then
-  INSTALLED=$(pip freeze 2>/dev/null | wc -l | tr -d ' ')
-  REQUIRED=$(grep -c . "$ROOT/backend/requirements.txt" 2>/dev/null || echo 0)
-  if [ "$INSTALLED" -lt 2 ] || ! pip freeze 2>/dev/null | grep -qi "fastapi"; then
+  if ! pip freeze 2>/dev/null | grep -qi "fastapi"; then
     echo -e "${YELLOW}  ⚙ Installing Python dependencies...${RESET}"
     pip install -r "$ROOT/backend/requirements.txt" --quiet
-    if [ $? -ne 0 ]; then
-      echo -e "${RED}  ✗ pip install failed. Check backend/requirements.txt.${RESET}"
-      exit 1
-    fi
     echo -e "  ${GREEN}✓ Python dependencies installed${RESET}"
   else
-    echo -e "  ${GREEN}✓ Python dependencies already installed${RESET}"
+    echo -e "  ${GREEN}✓ Python dependencies OK${RESET}"
   fi
 fi
 
 cd "$ROOT/backend"
-
 FRONTEND_URL="$FRONTEND_URL" uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload \
   > "$ROOT/backend.log" 2>&1 &
 BACKEND_PID=$!
 
-# Wait for backend to be ready
 echo -n "  Waiting for backend"
 for i in $(seq 1 20); do
   sleep 0.5
   if curl -s http://localhost:8000/ > /dev/null 2>&1; then
     echo -e "\r  ${GREEN}✓ Backend ready${RESET}  →  http://localhost:8000"
-    echo -e "    ${CYAN}API Docs:${RESET}  http://localhost:8000/docs"
     break
   fi
   echo -n "."
   if [ "$i" -eq 20 ]; then
-    echo -e "\n  ${RED}✗ Backend failed to start. Check backend.log for details.${RESET}"
-    cat "$ROOT/backend.log" | tail -10
+    echo -e "\n  ${RED}✗ Backend failed to start. Check backend.log${RESET}"
+    tail -5 "$ROOT/backend.log"
     cleanup
   fi
 done
-
 echo ""
 
-# ── Frontend ───────────────────────────────────────────────────────────────────
-echo -e "${BOLD}[2/2] Setting up Frontend (React + Vite)...${RESET}"
+# ══════════════════════════════════════════════════════════════════════════════
+# [4/5] Frontend (React + Vite)
+# ══════════════════════════════════════════════════════════════════════════════
+echo -e "${BOLD}[4/5] Setting up Frontend (React + Vite)...${RESET}"
 
 cd "$ROOT/frontend"
 
-if [ ! -d "node_modules" ] || [ ! -f "node_modules/.package-lock.json" ] && [ ! -f "node_modules/.modules.yaml" ]; then
-  echo -e "${YELLOW}  ⚙ node_modules not found — installing npm dependencies...${RESET}"
-  npm install
-  if [ $? -ne 0 ]; then
-    echo -e "${RED}  ✗ npm install failed. Check frontend/package.json.${RESET}"
-    cleanup
-  fi
+if [ ! -d "node_modules" ]; then
+  echo -e "${YELLOW}  ⚙ Installing npm dependencies...${RESET}"
+  npm install --quiet
   echo -e "  ${GREEN}✓ Node dependencies installed${RESET}"
 else
-  echo -e "  ${GREEN}✓ Node dependencies already installed${RESET}"
+  echo -e "  ${GREEN}✓ Node dependencies OK${RESET}"
 fi
 
-npm run dev \
-  > "$ROOT/frontend.log" 2>&1 &
+npm run dev > "$ROOT/frontend.log" 2>&1 &
 FRONTEND_PID=$!
 
 echo -n "  Waiting for frontend"
-for i in $(seq 1 20); do
+for i in $(seq 1 30); do
   sleep 0.5
   if curl -s http://localhost:5173/ > /dev/null 2>&1; then
-    echo -e "\r  ${GREEN}✓ Frontend ready${RESET} →  http://localhost:5173"
+    echo -e "\r  ${GREEN}✓ Frontend ready${RESET}  →  http://localhost:5173"
     break
   fi
   echo -n "."
-  if [ "$i" -eq 20 ]; then
-    echo -e "\n  ${RED}✗ Frontend failed to start. Check frontend.log for details.${RESET}"
-    cat "$ROOT/frontend.log" | tail -10
+  if [ "$i" -eq 30 ]; then
+    echo -e "\n  ${RED}✗ Frontend failed to start. Check frontend.log${RESET}"
+    tail -5 "$ROOT/frontend.log"
     cleanup
   fi
 done
 
 echo ""
+
+# ══════════════════════════════════════════════════════════════════════════════
+# [5/5] Ready
+# ══════════════════════════════════════════════════════════════════════════════
 echo -e "${BOLD}${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
 echo -e "${BOLD}  AgroChain is running!${RESET}"
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-echo -e "  ${BOLD}Local:${RESET}    http://localhost:5173"
-echo -e "  ${BOLD}Network:${RESET}  ${FRONTEND_URL}  ${CYAN}← scan QR from phone${RESET}"
-echo -e "  ${BOLD}API:${RESET}      http://localhost:8000"
-echo -e "  ${BOLD}API Docs:${RESET} http://localhost:8000/docs"
+echo -e "  ${BOLD}App:${RESET}        http://localhost:5173"
+echo -e "  ${BOLD}Network:${RESET}    ${FRONTEND_URL}  ${CYAN}← share with phone${RESET}"
+echo -e "  ${BOLD}API:${RESET}        http://localhost:8000"
+echo -e "  ${BOLD}Blockchain:${RESET} http://localhost:8545  (chainId: 31337)"
+echo -e "  ${BOLD}Contract:${RESET}   ${CONTRACT_ADDRESS}"
 echo -e ""
-echo -e "  ${BOLD}Logs:${RESET}     tail -f backend.log frontend.log"
+echo -e "  ${BOLD}Funded wallets:${RESET}"
+for ADDR in "${FUND_ADDRESSES[@]}"; do
+  echo -e "    ${CYAN}${ADDR}${RESET}"
+done
+echo -e ""
+echo -e "  ${BOLD}Admin wallet:${RESET} Import this key into MetaMask for admin access"
+echo -e "  ${CYAN}  (Check hardhat.log for Account #0 private key)${RESET}"
+echo -e ""
+echo -e "  ${BOLD}Logs:${RESET}       tail -f hardhat.log backend.log frontend.log"
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
 echo -e "${YELLOW}  Press Ctrl+C to stop all services${RESET}"
 echo ""
