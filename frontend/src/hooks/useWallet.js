@@ -60,8 +60,20 @@ export const useWallet = () => {
     }
   };
 
-  const disconnectWallet = () => {
+  const disconnectWallet = async () => {
     localStorage.setItem('agrochain_disconnected', '1');
+    // Revoke the site's MetaMask permission so the next connect forces the
+    // account picker instead of silently re-using the last session.
+    if (window.ethereum) {
+      try {
+        await window.ethereum.request({
+          method: 'wallet_revokePermissions',
+          params: [{ eth_accounts: {} }],
+        });
+      } catch {
+        // Wallet doesn't support EIP-2255 revoke (older MetaMask/other wallets) — ignore.
+      }
+    }
     setAccount(null);
     setIsConnected(false);
     setIsCorrectNetwork(false);

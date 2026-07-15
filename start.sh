@@ -289,8 +289,15 @@ for ADDR in "${FUND_ADDRESSES[@]}"; do
   echo -e "    ${CYAN}${ADDR}${RESET}"
 done
 echo -e ""
+ADMIN_ADDRESS=$(grep -A1 "^Account #0:" "$ROOT/hardhat.log" | head -1 | sed -E 's/^Account #0: ([^ ]+).*/\1/')
+ADMIN_PRIVATE_KEY=$(grep -A1 "^Account #0:" "$ROOT/hardhat.log" | sed -n '2p' | sed -E 's/^Private Key: //')
 echo -e "  ${BOLD}Admin wallet:${RESET} Import this key into MetaMask for admin access"
-echo -e "  ${CYAN}  (Check hardhat.log for Account #0 private key)${RESET}"
+if [ -n "$ADMIN_PRIVATE_KEY" ]; then
+  echo -e "    ${CYAN}Address:${RESET}     ${ADMIN_ADDRESS}"
+  echo -e "    ${CYAN}Private Key:${RESET} ${ADMIN_PRIVATE_KEY}"
+else
+  echo -e "  ${CYAN}  (Check hardhat.log for Account #0 private key)${RESET}"
+fi
 echo -e ""
 echo -e "  ${BOLD}Logs:${RESET}       tail -f hardhat.log backend.log frontend.log"
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"

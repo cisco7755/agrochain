@@ -11,7 +11,12 @@ module.exports = {
     },
   },
   networks: {
-    hardhat: {},
+    // Only 5 accounts are actually used by this project (admin, farmer,
+    // distributor, certifier, + a "stranger" account in the test suite) —
+    // capped here so `npx hardhat node` doesn't print 15 unused accounts.
+    hardhat: {
+      accounts: { count: 5 },
+    },
     localhost: {
       url: "http://127.0.0.1:8545",
       // If DEPLOYER_PRIVATE_KEY is set, your wallet deploys the contract and becomes admin.

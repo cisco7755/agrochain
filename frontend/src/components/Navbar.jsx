@@ -60,8 +60,8 @@ export default function Navbar() {
       ? 'flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold text-green-700 bg-green-50'
       : 'flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 hover:text-green-700 hover:bg-green-50 transition-all';
 
-  const handleDisconnect = () => {
-    disconnectWallet(); // sets localStorage flag
+  const handleDisconnect = async () => {
+    await disconnectWallet(); // revokes MetaMask permission + sets localStorage flag
     logout();
     setUserMenuOpen(false);
     setMenuOpen(false);
