@@ -85,6 +85,33 @@ class SupplyChainEvent(Base):
     product = relationship("Product", back_populates="events")
 
 
+class ScanEvent(Base):
+    """
+    QR-scan log for cloning/anomaly detection. product_id here is the
+    on-chain product ID (not a foreign key to Product.id) — scans must be
+    logged for any product that exists on-chain, independent of whether the
+    backend's local cache table happens to have a matching row.
+    """
+    __tablename__ = "scan_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    product_id = Column(Integer, nullable=False, index=True)
+    unit_number = Column(Integer, nullable=True, index=True)
+    ip_hash = Column(String, nullable=False)
+    user_agent = Column(String, nullable=True)
+    scanned_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+
+class FaucetRequest(Base):
+    """Cooldown ledger for the test-ETH faucet — one row per successful send."""
+    __tablename__ = "faucet_requests"
+
+    id = Column(Integer, primary_key=True, index=True)
+    address = Column(String, nullable=False, index=True)
+    tx_hash = Column(String, nullable=False)
+    requested_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+
 class Recall(Base):
     __tablename__ = "recalls"
 

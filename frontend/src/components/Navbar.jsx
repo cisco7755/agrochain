@@ -19,7 +19,6 @@ const BASE_LINKS = [
 const ROLE_LINKS = {
   ADMIN:       [
     { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { to: '/register', label: 'Register', icon: PlusCircle },
     { to: '/actors', label: 'Actors', icon: Users },
     { to: '/recalls', label: 'Recalls', icon: ShieldAlert },
   ],
@@ -28,7 +27,8 @@ const ROLE_LINKS = {
   DISTRIBUTOR: [{ to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard }],
   RETAILER:    [{ to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard }],
   CERTIFIER:   [{ to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard }],
-  VIEWER:      [],
+  VIEWER:      [{ to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard }],
+  PENDING:     [{ to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard }],
 };
 
 const ROLE_COLORS = {
@@ -39,6 +39,7 @@ const ROLE_COLORS = {
   RETAILER: 'bg-pink-100 text-pink-700',
   PROCESSOR: 'bg-indigo-100 text-indigo-700',
   VIEWER: 'bg-gray-100 text-gray-600',
+  PENDING: 'bg-amber-100 text-amber-700',
 };
 
 export default function Navbar() {

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Sprout, Plus, History, Leaf, Award, Hash, MapPin } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Sprout, Plus, History, Leaf, Award, Hash, MapPin, ChevronRight } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useContract } from '../../hooks/useContract';
 import Register from '../Register';
@@ -13,6 +14,7 @@ function formatDate(ts) {
 
 export default function FarmerDashboard() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const { getAgroChain } = useContract();
   const [tab, setTab] = useState('register');
   const [products, setProducts] = useState([]);
@@ -96,7 +98,11 @@ export default function FarmerDashboard() {
             ) : (
               <div className="space-y-3">
                 {products.map((p) => (
-                  <div key={p.id} className="border border-gray-100 rounded-xl p-4 hover:bg-gray-50 transition-colors">
+                  <button
+                    key={p.id}
+                    onClick={() => navigate(`/track/${p.id}`)}
+                    className="w-full text-left border border-gray-100 rounded-xl p-4 hover:bg-gray-50 hover:border-gray-200 transition-colors cursor-pointer"
+                  >
                     <div className="flex items-start justify-between gap-2">
                       <div>
                         <div className="flex items-center gap-2 flex-wrap">
@@ -106,7 +112,10 @@ export default function FarmerDashboard() {
                         </div>
                         <p className="text-xs text-gray-500 mt-0.5">{p.productType}</p>
                       </div>
-                      <span className="text-xs font-mono text-gray-400 bg-gray-100 px-2 py-1 rounded flex-shrink-0">#{p.id}</span>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <span className="text-xs font-mono text-gray-400 bg-gray-100 px-2 py-1 rounded">#{p.id}</span>
+                        <ChevronRight className="w-4 h-4 text-gray-300" />
+                      </div>
                     </div>
                     <div className="flex flex-wrap gap-3 mt-2 text-xs text-gray-500">
                       <span className="flex items-center gap-1"><Hash className="w-3 h-3" />{p.batchNumber}</span>
@@ -114,7 +123,7 @@ export default function FarmerDashboard() {
                       <span>Harvest: {formatDate(p.harvestDate)}</span>
                       <span>Expiry: {formatDate(p.expiryDate)}</span>
                     </div>
-                  </div>
+                  </button>
                 ))}
               </div>
             )}

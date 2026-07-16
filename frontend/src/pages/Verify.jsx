@@ -5,8 +5,10 @@ import {
   CheckCircle2, Leaf, Award, Shield, Share2, MapPin,
   User, Calendar, Hash, AlertCircle, Loader2, Sprout,
   Truck, Package, Factory, ShoppingCart, ArrowLeft,
+  ScanLine, ShieldAlert, Tag,
 } from 'lucide-react';
 import { useContract } from '../hooks/useContract';
+import { logScan } from '../services/api';
 
 // ── Enum maps (must match AgroChain.sol) ─────────────────────────────────────
 const EVENT_TYPE_NAMES = [
@@ -115,13 +117,15 @@ async function loadFromChain(contract, productId) {
 }
 
 export default function Verify() {
-  const { productId } = useParams();
+  const { productId, unitNumber } = useParams();
   const navigate = useNavigate();
   const { getAgroChain } = useContract();
   const [product, setProduct] = useState(null);
   const [events, setEvents]   = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState('');
+  const [unitValid, setUnitValid] = useState(true);
+  const [scanStats, setScanStats] = useState(null);
 
   useEffect(() => {
     if (!productId) { setLoading(false); return; }
@@ -142,6 +146,20 @@ export default function Verify() {
         const data = await loadFromChain(contract, id);
         setProduct(data.product);
         setEvents(data.events);
+
+        const unit = unitNumber ? parseInt(unitNumber, 10) : null;
+        if (unit) {
+          try {
+            const issued = Number(await contract.unitCount(id));
+            setUnitValid(unit > 0 && unit <= issued);
+          } catch { setUnitValid(false); }
+        }
+
+        // Fire-and-forget: log the scan for anti-cloning anomaly detection.
+        // Never blocks or fails the verification render — the backend
+        // scan log is a signal layer on top of the on-chain data, not a
+        // source of truth for it.
+        logScan(id, unit || undefined).then(setScanStats).catch(() => {});
       } catch (err) {
         setError(err?.reason || err?.message || 'Product not found');
       } finally {
@@ -150,7 +168,7 @@ export default function Verify() {
     };
 
     run();
-  }, [productId]);
+  }, [productId, unitNumber]);
 
   const handleShare = () => {
     const url = window.location.href;
@@ -219,6 +237,35 @@ export default function Verify() {
       </div>
 
       <div className="max-w-2xl mx-auto px-4 py-8 space-y-6">
+        {/* Unit mismatch warning */}
+        {unitNumber && !unitValid && (
+          <div className="bg-red-50 border border-red-200 rounded-2xl p-4 flex items-start gap-3">
+            <ShieldAlert className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-bold text-red-800">Unit #{unitNumber} not recognized</p>
+              <p className="text-xs text-red-700 mt-0.5">
+                This QR code claims to be unit #{unitNumber} of this product, but no such unit has been issued on-chain.
+                The underlying product data below is genuine, but this specific label may not be.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Suspicious scan-activity warning */}
+        {scanStats?.suspicious && (
+          <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex items-start gap-3">
+            <ShieldAlert className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-bold text-amber-800">Unusual scan activity detected</p>
+              <p className="text-xs text-amber-700 mt-0.5">
+                This code has been scanned {scanStats.scans_24h} times from {scanStats.distinct_scanners_24h} different
+                sources in the last 24 hours — more than a single physical item typically sees. It may have been copied
+                onto multiple products. If in doubt, verify with the seller.
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* Product Identity */}
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
           <div className="h-1.5 bg-gradient-to-r from-green-500 to-emerald-400" />
@@ -238,6 +285,11 @@ export default function Verify() {
               {product.is_certified && (
                 <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-semibold bg-yellow-100 text-yellow-800">
                   <Award className="w-4 h-4" /> Certified Organic
+                </span>
+              )}
+              {unitNumber && unitValid && (
+                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-semibold bg-indigo-100 text-indigo-800">
+                  <Tag className="w-4 h-4" /> Unit #{unitNumber}
                 </span>
               )}
             </div>
@@ -329,6 +381,15 @@ export default function Verify() {
                 {events.length} immutable events recorded on-chain
               </span>
             </div>
+            {scanStats && (
+              <div className="flex items-center gap-2 mt-2 bg-green-700/30 rounded-lg px-3 py-2">
+                <ScanLine className="w-3.5 h-3.5 text-green-300 flex-shrink-0" />
+                <span className="text-xs font-semibold text-green-200">
+                  {scanStats.total_scans} scan{scanStats.total_scans === 1 ? '' : 's'} total
+                  {' · '}{scanStats.scans_24h} in the last 24h
+                </span>
+              </div>
+            )}
           </div>
         </div>
 

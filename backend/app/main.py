@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from app.database import Base, SessionLocal, engine
 from app.models import Actor, Product, Recall, SupplyChainEvent, User
 from app.routes import actors, events, products, stats
-from app.routes import auth, recalls, uploads, export
+from app.routes import auth, recalls, uploads, export, faucet
 from app.services.blockchain import blockchain_service
 from app.auth import hash_password
 
@@ -235,6 +235,7 @@ app.include_router(stats.router)
 app.include_router(recalls.router)
 app.include_router(uploads.router)
 app.include_router(export.router)
+app.include_router(faucet.router)
 
 
 @app.get("/")

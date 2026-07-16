@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Shield, Users, Package, Activity, Plus, X, CheckCircle, Loader2, Pencil } from 'lucide-react';
+import { Shield, Users, Package, Activity, Plus, X, CheckCircle, Loader2, Pencil, Clock, Check } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useContract } from '../../hooks/useContract';
 import { ROLE_NUMBERS } from '../../config/constants';
@@ -19,6 +19,9 @@ export default function AdminDashboard() {
   const [editingActor, setEditingActor] = useState(null); // actor being edited
   const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState({ eth_address: '', name: '', role: 'FARMER', location: '' });
+  const [pending, setPending] = useState([]);
+  const [loadingPending, setLoadingPending] = useState(false);
+  const [approvingAddress, setApprovingAddress] = useState(null);
 
   const loadStats = async () => {
     try {
@@ -57,7 +60,43 @@ export default function AdminDashboard() {
     finally { setLoadingActors(false); }
   };
 
-  useEffect(() => { loadStats(); }, []);
+  const loadPending = async () => {
+    setLoadingPending(true);
+    try {
+      const contract = getAgroChain();
+      const result = await contract.getPendingActors();
+      setPending(result.map((a) => ({
+        eth_address: a.actorAddress,
+        name: a.name,
+        role: ROLE_NAMES[Number(a.role)] || 'NONE',
+        location: a.location,
+        registeredAt: a.registeredAt ? Number(a.registeredAt) * 1000 : null,
+      })));
+    } catch (err) { console.error(err); }
+    finally { setLoadingPending(false); }
+  };
+
+  const handleApprove = async (address) => {
+    setApprovingAddress(address);
+    try {
+      const contract = getAgroChain(true);
+      const toastId = toast.loading('Waiting for MetaMask…');
+      const tx = await contract.approveActor(address);
+      toast.loading('Approving on blockchain…', { id: toastId });
+      await tx.wait();
+      toast.success('Actor approved — they now have full access', { id: toastId });
+      loadPending();
+      if (tab === 'actors') loadActors();
+      loadStats();
+    } catch (err) {
+      if (err.code === 4001) toast.error('Rejected in MetaMask.');
+      else toast.error(err.message || 'Approval failed');
+    } finally {
+      setApprovingAddress(null);
+    }
+  };
+
+  useEffect(() => { loadStats(); loadPending(); }, []);
   useEffect(() => { if (tab === 'actors') loadActors(); }, [tab]);
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
@@ -106,6 +145,7 @@ export default function AdminDashboard() {
   const tabs = [
     { id: 'overview', label: 'Overview', icon: Activity },
     { id: 'actors', label: 'Manage Actors', icon: Users },
+    { id: 'pending', label: 'Pending Approvals', icon: Clock, badge: pending.length },
   ];
 
   return (
@@ -125,12 +165,17 @@ export default function AdminDashboard() {
 
       <div className="max-w-5xl mx-auto px-4 py-6">
         <div className="flex gap-2 mb-6">
-          {tabs.map(({ id, label, icon: Icon }) => (
+          {tabs.map(({ id, label, icon: Icon, badge }) => (
             <button key={id} onClick={() => setTab(id)}
               className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-colors ${
                 tab === id ? 'bg-purple-600 text-white shadow-sm' : 'bg-white text-gray-600 hover:bg-gray-50 border border-gray-100'
               }`}>
               <Icon className="w-4 h-4" />{label}
+              {!!badge && (
+                <span className={`px-1.5 py-0.5 rounded-full text-xs font-bold ${
+                  tab === id ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-700'
+                }`}>{badge}</span>
+              )}
             </button>
           ))}
         </div>
@@ -268,6 +313,53 @@ export default function AdminDashboard() {
                           title="Edit actor"
                         >
                           <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {tab === 'pending' && (
+          <div className="space-y-4">
+            <div>
+              <h2 className="text-base font-bold text-gray-900">Pending Approvals ({pending.length})</h2>
+              <p className="text-xs text-gray-400 mt-0.5">Actors who self-registered and are waiting on approval — read-only until approved.</p>
+            </div>
+
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+              {loadingPending ? (
+                <div className="flex items-center justify-center py-12 gap-2 text-gray-400 text-sm">
+                  <div className="w-5 h-5 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" /> Loading…
+                </div>
+              ) : pending.length === 0 ? (
+                <div className="text-center py-12 text-gray-400 text-sm">No pending registration requests</div>
+              ) : (
+                <div className="divide-y divide-gray-50">
+                  {pending.map((a) => (
+                    <div key={a.eth_address} className="flex items-center gap-4 px-5 py-3.5 hover:bg-gray-50">
+                      <div className="w-9 h-9 rounded-full bg-amber-100 flex items-center justify-center text-sm font-bold text-amber-700 flex-shrink-0">
+                        {a.name?.charAt(0)}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-gray-900">{a.name}</p>
+                        <p className="text-xs text-gray-400 font-mono truncate">{a.eth_address}</p>
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <span className="text-xs font-semibold text-amber-700 bg-amber-100 px-2 py-1 rounded-lg">{a.role}</span>
+                        <span className="text-xs text-gray-400 hidden sm:block">{a.location}</span>
+                        <button
+                          onClick={() => handleApprove(a.eth_address)}
+                          disabled={approvingAddress === a.eth_address}
+                          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-green-600 hover:bg-green-700 disabled:bg-green-400 rounded-lg transition-colors"
+                        >
+                          {approvingAddress === a.eth_address
+                            ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            : <Check className="w-3.5 h-3.5" />}
+                          Approve
                         </button>
                       </div>
                     </div>

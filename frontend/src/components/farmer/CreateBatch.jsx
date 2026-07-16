@@ -4,6 +4,7 @@ import { useIPFS } from '../../hooks/useIPFS';
 import { PRODUCT_TYPES } from '../../config/constants';
 import { toUnixTimestamp } from '../../utils/hashUtils';
 import TransactionStatus from '../shared/TransactionStatus';
+import LocationInput from '../shared/LocationInput';
 import toast from 'react-hot-toast';
 
 const CreateBatch = ({ actorLocation }) => {
@@ -118,9 +119,12 @@ const CreateBatch = ({ actorLocation }) => {
         </div>
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Farm Location</label>
-          <input type="text" placeholder={actorLocation || 'e.g. Minna, Niger State'}
-            value={form.farmLocation} onChange={e => set('farmLocation', e.target.value)}
-            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent" />
+          <LocationInput
+            placeholder={actorLocation || 'e.g. Minna, Niger State'}
+            value={form.farmLocation}
+            onChange={(val) => set('farmLocation', val)}
+            className="w-full p-3 text-sm border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent transition"
+          />
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>

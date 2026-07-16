@@ -230,7 +230,7 @@ export default function Home() {
                 <Search className="w-5 h-5" />
                 Track a Product
               </button>
-              {(user?.role === 'FARMER' || user?.role === 'ADMIN') && (
+              {user?.role === 'FARMER' && (
                 <button
                   onClick={() => navigate('/register')}
                   className="flex items-center gap-2 px-6 py-3.5 bg-green-600 text-white font-bold rounded-xl border border-green-500 shadow-lg hover:bg-green-500 hover:shadow-xl hover:-translate-y-0.5 transition-all duration-150"
@@ -384,7 +384,7 @@ export default function Home() {
               <p className="text-gray-400 font-medium">
                 {isFarmer ? 'You have not registered any products yet' : 'No products registered yet'}
               </p>
-              {(user?.role === 'FARMER' || user?.role === 'ADMIN') && (
+              {user?.role === 'FARMER' && (
                 <button
                   onClick={() => navigate('/register')}
                   className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-green-600 hover:text-green-700"
@@ -428,7 +428,7 @@ export default function Home() {
             Register your farm's products today and give consumers the transparency they deserve.
           </p>
           <div className="flex flex-wrap gap-4 justify-center">
-            {(user?.role === 'FARMER' || user?.role === 'ADMIN') && (
+            {user?.role === 'FARMER' && (
               <button
                 onClick={() => navigate('/register')}
                 className="flex items-center gap-2 px-8 py-3.5 bg-white text-green-800 font-bold rounded-xl shadow-lg hover:bg-green-50 transition-all duration-150"

@@ -5,12 +5,16 @@ import {
   Search, Leaf, Award, MapPin, User, Calendar, Hash,
   Package, ChevronRight, Loader2, ExternalLink,
   AlertTriangle, Thermometer, FileText, Map,
+  Download, Printer, PlusCircle, Tag,
 } from 'lucide-react';
-import { QRCodeSVG } from 'qrcode.react';
+import { QRCodeCanvas } from 'qrcode.react';
 import Timeline from '../components/Timeline';
 import ColdChainChart from '../components/ColdChainChart';
 import SupplyChainMap from '../components/SupplyChainMap';
 import { useContract } from '../hooks/useContract';
+import { useAuth } from '../context/AuthContext';
+
+const ACTOR_ROLES = ['FARMER', 'PROCESSOR', 'DISTRIBUTOR', 'RETAILER', 'CERTIFIER', 'ADMIN'];
 
 // ── Enum maps (must match AgroChain.sol) ─────────────────────────────────────
 const EVENT_TYPE_NAMES = [
@@ -123,6 +127,8 @@ export default function Track() {
   const { productId: urlProductId } = useParams();
   const navigate = useNavigate();
   const { getAgroChain } = useContract();
+  const { user } = useAuth();
+  const canIssueUnits = ACTOR_ROLES.includes(user?.role);
 
   const [query, setQuery]         = useState('');
   const [product, setProduct]     = useState(null);
@@ -130,9 +136,90 @@ export default function Track() {
   const [loading, setLoading]     = useState(false);
   const [error, setError]         = useState('');
   const [activeTab, setActiveTab] = useState('timeline');
+  const [issuedUnits, setIssuedUnits] = useState([]); // unit numbers issued on-chain for this product
+  const [activeUnit, setActiveUnit]   = useState(null); // null = whole-batch QR
+  const [issuingUnit, setIssuingUnit] = useState(false);
+
+  const loadUnits = async (productId) => {
+    try {
+      const contract = getAgroChain();
+      const currentBlock = await contract.provider.getBlockNumber();
+      const events2 = await contract.queryFilter(
+        contract.filters.UnitIssued(productId),
+        Math.max(0, currentBlock - 100000),
+      );
+      const nums = [...new Set(events2.map((e) => Number(e.args.unitNumber ?? e.args[1])))].sort((a, b) => a - b);
+      setIssuedUnits(nums);
+    } catch { setIssuedUnits([]); }
+  };
+
+  const handleIssueUnit = async () => {
+    if (!product) return;
+    setIssuingUnit(true);
+    try {
+      const contract = getAgroChain(true);
+      const toastId = toast.loading('Waiting for MetaMask confirmation…');
+      const tx = await contract.issueUnit(product.id);
+      toast.loading('Issuing unit on blockchain…', { id: toastId });
+      const receipt = await tx.wait();
+      const ev = receipt.events?.find((e) => e.event === 'UnitIssued');
+      const unitNumber = ev?.args?.unitNumber ? Number(ev.args.unitNumber) : null;
+      toast.success(unitNumber ? `Unit #${unitNumber} issued` : 'Unit issued', { id: toastId });
+      await loadUnits(product.id);
+      if (unitNumber) setActiveUnit(unitNumber);
+    } catch (err) {
+      if (err.code === 4001) toast.error('Rejected in MetaMask.');
+      else toast.error(err.message || 'Failed to issue unit');
+    } finally {
+      setIssuingUnit(false);
+    }
+  };
+
+  const downloadQR = () => {
+    const canvas = document.getElementById('product-qr-canvas');
+    if (!canvas) return;
+    const url = canvas.toDataURL('image/png');
+    const link = document.createElement('a');
+    const label = activeUnit ? `unit-${activeUnit}` : 'batch';
+    link.download = `agrochain-${product?.batch_number || product?.id}-${label}.png`;
+    link.href = url;
+    link.click();
+  };
+
+  const printQR = () => {
+    const canvas = document.getElementById('product-qr-canvas');
+    if (!canvas || !product) return;
+    const dataUrl = canvas.toDataURL('image/png');
+    const win = window.open('', '_blank', 'width=400,height=560');
+    if (!win) { toast.error('Please allow pop-ups to print the label'); return; }
+    win.document.write(`
+      <html>
+        <head>
+          <title>${product.name} — QR Label</title>
+          <style>
+            body { font-family: -apple-system, sans-serif; text-align: center; padding: 24px; }
+            img { width: 220px; height: 220px; }
+            h1 { font-size: 16px; margin: 12px 0 2px; }
+            p { font-size: 11px; color: #555; margin: 2px 0; word-break: break-all; }
+            .badge { display: inline-block; margin-top: 8px; padding: 4px 10px; border-radius: 999px;
+                     background: #ecfdf5; color: #047857; font-size: 11px; font-weight: 700; }
+          </style>
+        </head>
+        <body onload="window.print()">
+          <img src="${dataUrl}" />
+          <h1>${product.name}</h1>
+          <p>${product.batch_number}${activeUnit ? ` · Unit #${activeUnit}` : ''}</p>
+          <p>${activeUnit ? unitVerifyUrl : verifyUrl}</p>
+          <span class="badge">AgroChain Verified</span>
+        </body>
+      </html>
+    `);
+    win.document.close();
+  };
 
   const doLoad = async (idOrBatch) => {
     setLoading(true); setError(''); setProduct(null); setEvents([]);
+    setIssuedUnits([]); setActiveUnit(null);
     try {
       const contract = getAgroChain();
       let productId;
@@ -152,6 +239,7 @@ export default function Track() {
       const data = await loadFromChain(contract, productId);
       setProduct(data.product);
       setEvents(data.events);
+      loadUnits(productId);
     } catch (err) {
       const msg = err?.reason || err?.data?.message || err?.message || 'Product not found';
       setError(msg);
@@ -243,6 +331,8 @@ export default function Track() {
   };
 
   const verifyUrl = product ? `http://${window.location.hostname}:5173/verify/${product.id}` : '';
+  const unitVerifyUrl = product && activeUnit ? `${verifyUrl}/${activeUnit}` : '';
+  const qrValue = activeUnit ? unitVerifyUrl : verifyUrl;
   const expired      = isExpired(product?.expiry_date);
   const expiringSoon = isExpiringSoon(product?.expiry_date);
 
@@ -403,24 +493,81 @@ export default function Track() {
               {/* QR Code */}
               <div className="space-y-4">
                 <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5 text-center">
-                  <h3 className="text-sm font-bold text-gray-700 mb-4">Consumer QR Code</h3>
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-sm font-bold text-gray-700">
+                      {activeUnit ? `Unit #${activeUnit} QR Code` : 'Consumer QR Code'}
+                    </h3>
+                    {activeUnit && (
+                      <button onClick={() => setActiveUnit(null)}
+                        className="text-xs font-semibold text-gray-400 hover:text-gray-600">
+                        Whole batch →
+                      </button>
+                    )}
+                  </div>
                   <div className="flex justify-center mb-4">
                     <div className="p-3 bg-white border-2 border-green-200 rounded-xl shadow-inner">
-                      <QRCodeSVG value={verifyUrl} size={160} fgColor="#15803d" level="H" />
+                      <QRCodeCanvas id="product-qr-canvas" value={qrValue} size={160} fgColor="#15803d" level="H" includeMargin />
                     </div>
                   </div>
                   <p className="text-xs text-gray-500 mb-3 break-all font-mono bg-gray-50 p-2 rounded-lg">
-                    {verifyUrl}
+                    {qrValue}
                   </p>
+                  <div className="grid grid-cols-2 gap-2 mb-2">
+                    <button onClick={downloadQR}
+                      className="flex items-center justify-center gap-1.5 py-2 text-xs font-semibold text-green-700 bg-green-50 border border-green-200 rounded-lg hover:bg-green-100">
+                      <Download className="w-3.5 h-3.5" /> Download
+                    </button>
+                    <button onClick={printQR}
+                      className="flex items-center justify-center gap-1.5 py-2 text-xs font-semibold text-green-700 bg-green-50 border border-green-200 rounded-lg hover:bg-green-100">
+                      <Printer className="w-3.5 h-3.5" /> Print Label
+                    </button>
+                  </div>
                   <button
-                    onClick={() => { navigator.clipboard.writeText(verifyUrl); toast.success('URL copied!'); }}
-                    className="w-full py-2 text-xs font-semibold text-green-700 bg-green-50 border border-green-200 rounded-lg hover:bg-green-100"
+                    onClick={() => { navigator.clipboard.writeText(qrValue); toast.success('URL copied!'); }}
+                    className="w-full py-2 text-xs font-semibold text-gray-500 hover:text-gray-700"
                   >
                     Copy Verify URL
                   </button>
                 </div>
+
+                {canIssueUnits && (
+                  <div className="bg-white rounded-xl border border-indigo-100 shadow-sm p-5">
+                    <div className="flex items-center gap-2 mb-1">
+                      <Tag className="w-4 h-4 text-indigo-600" />
+                      <h3 className="text-sm font-bold text-gray-700">Per-Unit Labels</h3>
+                    </div>
+                    <p className="text-xs text-gray-400 mb-3">
+                      Issue a distinct QR per physical package — cloning one unit's label doesn't implicate the rest of the batch.
+                    </p>
+                    <button
+                      onClick={handleIssueUnit}
+                      disabled={issuingUnit}
+                      className="w-full flex items-center justify-center gap-2 py-2.5 text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 rounded-xl mb-3"
+                    >
+                      {issuingUnit
+                        ? <><Loader2 className="w-4 h-4 animate-spin" /> Issuing…</>
+                        : <><PlusCircle className="w-4 h-4" /> Issue New Unit</>}
+                    </button>
+                    {issuedUnits.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {issuedUnits.map((n) => (
+                          <button key={n} onClick={() => setActiveUnit(n)}
+                            className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors ${
+                              activeUnit === n
+                                ? 'bg-indigo-600 text-white border-indigo-600'
+                                : 'bg-indigo-50 text-indigo-700 border-indigo-100 hover:bg-indigo-100'
+                            }`}
+                          >
+                            #{n}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <button
-                  onClick={() => navigate(`/verify/${product.id}`)}
+                  onClick={() => navigate(activeUnit ? `/verify/${product.id}/${activeUnit}` : `/verify/${product.id}`)}
                   className="w-full flex items-center justify-center gap-2 py-3 text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-sm"
                 >
                   <ExternalLink className="w-4 h-4" /> Open Consumer View

@@ -8,6 +8,7 @@ import {
 import { useAuth } from '../context/AuthContext';
 import { useContract } from '../hooks/useContract';
 import { toUnixTimestamp } from '../utils/hashUtils';
+import LocationInput from '../components/shared/LocationInput';
 
 const PRODUCT_TYPES = ['Vegetables', 'Fruits', 'Grains', 'Dairy', 'Meat', 'Other'];
 
@@ -64,7 +65,8 @@ export default function Register() {
   const navigate = useNavigate();
   const { user, isAuthenticated } = useAuth();
   const { getAgroChain } = useContract();
-  const canRegister = isAuthenticated && (user?.role === 'ADMIN' || user?.role === 'FARMER');
+  // The contract restricts registerProduct to the FARMER role — admin is not an override.
+  const canRegister = isAuthenticated && user?.role === 'FARMER';
 
   const [submitting, setSubmitting] = useState(false);
   const [txHash, setTxHash] = useState(null);
@@ -286,10 +288,10 @@ export default function Register() {
 
                 <div>
                   <FieldLabel required>Farm Location</FieldLabel>
-                  <Input
+                  <LocationInput
                     placeholder="e.g. Nairobi, Kenya"
                     value={form.farm_location}
-                    onChange={set('farm_location')}
+                    onChange={(val) => setForm((f) => ({ ...f, farm_location: val }))}
                     required
                   />
                 </div>

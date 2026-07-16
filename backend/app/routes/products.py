@@ -1,15 +1,28 @@
+import hashlib
+from datetime import datetime, timedelta
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import Product, SupplyChainEvent
-from app.schemas import ProductCreate, ProductDetail, ProductResponse, TrackResponse
+from app.models import Product, ScanEvent, SupplyChainEvent
+from app.schemas import ProductCreate, ProductDetail, ProductResponse, ScanStatsResponse, TrackResponse
 from app.services.blockchain import blockchain_service
 from app.services.qr_service import qr_service
 
 router = APIRouter(prefix="/products", tags=["Products"])
+
+# Heuristic thresholds for flagging a QR code as possibly cloned/relabeled —
+# not proof of fraud, just a signal that this code is circulating more widely
+# than a single physical item plausibly would be.
+SUSPICIOUS_SCANS_24H = 20
+SUSPICIOUS_DISTINCT_SCANNERS_24H = 10
+
+
+def _hash_ip(ip: str) -> str:
+    """One-way hash so raw visitor IPs are never persisted."""
+    return hashlib.sha256(ip.encode()).hexdigest()[:16]
 
 
 @router.get("/", response_model=List[ProductResponse])
@@ -90,6 +103,53 @@ def get_product_qr(product_id: int, db: Session = Depends(get_db)):
 
     qr_code = qr_service.generate_qr_base64(product.id, product.batch_number)
     return {"product_id": product_id, "batch_number": product.batch_number, "qr_code": qr_code}
+
+
+@router.post("/{product_id}/scan", response_model=ScanStatsResponse)
+def log_scan(
+    product_id: int,
+    request: Request,
+    unit: Optional[int] = Query(default=None, ge=1, description="Unit number, if this QR is a per-unit code"),
+    db: Session = Depends(get_db),
+):
+    """
+    Log a QR-code scan and return activity stats for anomaly detection.
+
+    Works for any on-chain product ID, independent of whether the backend's
+    local product cache has a matching row — the real product data lives on
+    the blockchain and is fetched by the frontend directly.
+    """
+    client_ip = request.client.host if request.client else "unknown"
+    db.add(ScanEvent(
+        product_id=product_id,
+        unit_number=unit,
+        ip_hash=_hash_ip(client_ip),
+        user_agent=request.headers.get("user-agent"),
+    ))
+    db.commit()
+
+    query = db.query(ScanEvent).filter(ScanEvent.product_id == product_id)
+    if unit is not None:
+        query = query.filter(ScanEvent.unit_number == unit)
+
+    total_scans = query.count()
+
+    since = datetime.utcnow() - timedelta(hours=24)
+    recent = query.filter(ScanEvent.scanned_at >= since).all()
+    scans_24h = len(recent)
+    distinct_scanners_24h = len({r.ip_hash for r in recent})
+
+    suspicious = (
+        scans_24h > SUSPICIOUS_SCANS_24H
+        or distinct_scanners_24h > SUSPICIOUS_DISTINCT_SCANNERS_24H
+    )
+
+    return ScanStatsResponse(
+        total_scans=total_scans,
+        scans_24h=scans_24h,
+        distinct_scanners_24h=distinct_scanners_24h,
+        suspicious=suspicious,
+    )
 
 
 @router.delete("/{product_id}", status_code=204)

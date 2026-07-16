@@ -33,6 +33,17 @@ export const trackProduct = (id) => api.get(`/products/${id}/track`).then((r) =>
 export const getProductByBatch = (batch) =>
   api.get(`/products/batch/${encodeURIComponent(batch)}`).then((r) => r.data);
 
+// QR-scan anti-cloning: logs a scan and returns activity stats. Works for
+// any on-chain product ID, whether or not the backend cache knows about it.
+export const logScan = (productId, unitNumber) =>
+  api.post(`/products/${productId}/scan`, null, {
+    params: unitNumber ? { unit: unitNumber } : {},
+  }).then((r) => r.data);
+
+// Test-ETH faucet — funds a wallet so it can pay gas (rate-limited server-side).
+export const requestFaucet = (address) =>
+  api.post('/faucet/', { address }).then((r) => r.data);
+
 // ── Events ────────────────────────────────────────────────────────────────────
 export const getEvents = (productId) =>
   api.get('/events', { params: productId ? { product_id: productId } : {} }).then((r) => r.data);

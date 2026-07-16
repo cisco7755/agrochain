@@ -2,6 +2,14 @@
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Pass --fresh (or --reset) to wipe the local chain and redeploy from
+# scratch. Without it, an already-running Hardhat node is reused as-is —
+# registered actors, products, etc. survive restarting the backend/frontend.
+RESET_CHAIN=false
+if [ "$1" = "--fresh" ] || [ "$1" = "--reset" ]; then
+  RESET_CHAIN=true
+fi
+
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
@@ -59,7 +67,23 @@ FRONTEND_URL="http://${LOCAL_IP}:5173"
 # ══════════════════════════════════════════════════════════════════════════════
 echo -e "${BOLD}[0/5] Killing existing processes...${RESET}"
 
-for PORT in 5173 8000 8545; do
+# Detect whether a healthy Hardhat node is already on 8545 so we can leave it
+# (and its chain state — registered actors, products, pending requests…)
+# alone. Backend/frontend always restart fresh; only the chain is precious.
+CHAIN_ALIVE=false
+if curl -s -X POST http://localhost:8545 \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
+  2>/dev/null | grep -q '"result"'; then
+  CHAIN_ALIVE=true
+fi
+
+PORTS_TO_CLEAR=(5173 8000)
+if [ "$RESET_CHAIN" = true ] || [ "$CHAIN_ALIVE" = false ]; then
+  PORTS_TO_CLEAR+=(8545)
+fi
+
+for PORT in "${PORTS_TO_CLEAR[@]}"; do
   PIDS=$(lsof -ti tcp:$PORT 2>/dev/null)
   if [ -n "$PIDS" ]; then
     echo -e "${YELLOW}  ⚙ Stopping process on port $PORT...${RESET}"
@@ -68,10 +92,15 @@ for PORT in 5173 8000 8545; do
 done
 
 pkill -f "uvicorn app.main:app" 2>/dev/null
-pkill -f "hardhat node" 2>/dev/null
+[[ " ${PORTS_TO_CLEAR[*]} " == *" 8545 "* ]] && pkill -f "hardhat node" 2>/dev/null
 pkill -f "vite" 2>/dev/null
 sleep 1
-echo -e "  ${GREEN}✓ Ports cleared (5173, 8000, 8545)${RESET}"
+
+if [ "$CHAIN_ALIVE" = true ] && [ "$RESET_CHAIN" = false ]; then
+  echo -e "  ${GREEN}✓ Ports cleared (5173, 8000) — reusing existing chain on 8545${RESET}"
+else
+  echo -e "  ${GREEN}✓ Ports cleared (5173, 8000, 8545)${RESET}"
+fi
 echo ""
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -105,62 +134,93 @@ echo -e "${BOLD}[2/5] Starting Blockchain (Hardhat Local)...${RESET}"
 
 cd "$ROOT/contracts"
 
-# Start Hardhat node in background
-npx hardhat node > "$ROOT/hardhat.log" 2>&1 &
-HARDHAT_PID=$!
-
-# Wait for node to be ready
-echo -n "  Waiting for Hardhat node"
-for i in $(seq 1 30); do
-  sleep 0.5
-  if curl -s -X POST http://localhost:8545 \
-    -H "Content-Type: application/json" \
-    -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
-    > /dev/null 2>&1; then
-    echo -e "\r  ${GREEN}✓ Hardhat node running${RESET}  →  http://localhost:8545"
-    break
+REUSE_CHAIN=false
+if [ "$CHAIN_ALIVE" = true ] && [ "$RESET_CHAIN" = false ]; then
+  # Verify deployments/latest.json actually points at live bytecode on the
+  # already-running chain before trusting it — falls through to a fresh
+  # deploy below if the file is stale, missing, or the code isn't there.
+  EXISTING_ADDRESS=$(node -e "
+    try { console.log(require('./deployments/latest.json').contractAddress); } catch {}
+  " 2>/dev/null)
+  if [ -n "$EXISTING_ADDRESS" ]; then
+    CODE=$(curl -s -X POST http://localhost:8545 \
+      -H "Content-Type: application/json" \
+      -d "{\"jsonrpc\":\"2.0\",\"method\":\"eth_getCode\",\"params\":[\"$EXISTING_ADDRESS\",\"latest\"],\"id\":1}")
+    if echo "$CODE" | grep -qv '"result":"0x"'; then
+      REUSE_CHAIN=true
+      CONTRACT_ADDRESS="$EXISTING_ADDRESS"
+    fi
   fi
-  echo -n "."
-  if [ "$i" -eq 30 ]; then
-    echo -e "\n  ${RED}✗ Hardhat node failed to start.${RESET}"
-    tail -5 "$ROOT/hardhat.log"
+fi
+
+if [ "$REUSE_CHAIN" = true ]; then
+  echo -e "  ${GREEN}✓ Reusing already-running Hardhat node${RESET}  →  http://localhost:8545"
+  echo -e "  ${GREEN}✓ Reusing existing contract${RESET}  →  ${CONTRACT_ADDRESS}  ${CYAN}(actors/products preserved — pass --fresh to reset)${RESET}"
+else
+  # Start Hardhat node in background
+  npx hardhat node > "$ROOT/hardhat.log" 2>&1 &
+  HARDHAT_PID=$!
+
+  # Wait for node to be ready
+  echo -n "  Waiting for Hardhat node"
+  for i in $(seq 1 30); do
+    sleep 0.5
+    if curl -s -X POST http://localhost:8545 \
+      -H "Content-Type: application/json" \
+      -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
+      > /dev/null 2>&1; then
+      echo -e "\r  ${GREEN}✓ Hardhat node running${RESET}  →  http://localhost:8545"
+      break
+    fi
+    echo -n "."
+    if [ "$i" -eq 30 ]; then
+      echo -e "\n  ${RED}✗ Hardhat node failed to start.${RESET}"
+      tail -5 "$ROOT/hardhat.log"
+      cleanup
+    fi
+  done
+
+  # Deploy contract
+  echo -e "  ${YELLOW}⚙ Deploying AgroChain contract...${RESET}"
+  DEPLOY_OUTPUT=$(npx hardhat run scripts/deploy.js --network localhost 2>&1)
+  if [ $? -ne 0 ]; then
+    echo -e "  ${RED}✗ Deployment failed:${RESET}"
+    echo "$DEPLOY_OUTPUT" | tail -10
     cleanup
   fi
-done
 
-# Deploy contract
-echo -e "  ${YELLOW}⚙ Deploying AgroChain contract...${RESET}"
-DEPLOY_OUTPUT=$(npx hardhat run scripts/deploy.js --network localhost 2>&1)
-if [ $? -ne 0 ]; then
-  echo -e "  ${RED}✗ Deployment failed:${RESET}"
-  echo "$DEPLOY_OUTPUT" | tail -10
-  cleanup
+  # Read contract address from deployments/latest.json
+  CONTRACT_ADDRESS=$(node -e "
+    const f = require('./deployments/latest.json');
+    console.log(f.contractAddress);
+  " 2>/dev/null)
+
+  if [ -z "$CONTRACT_ADDRESS" ]; then
+    echo -e "  ${RED}✗ Could not read contract address from deployments/latest.json${RESET}"
+    cleanup
+  fi
+
+  echo -e "  ${GREEN}✓ Contract deployed${RESET}  →  ${CONTRACT_ADDRESS}"
 fi
 
-# Read contract address from deployments/latest.json
-CONTRACT_ADDRESS=$(node -e "
-  const f = require('./deployments/latest.json');
-  console.log(f.contractAddress);
-" 2>/dev/null)
-
-if [ -z "$CONTRACT_ADDRESS" ]; then
-  echo -e "  ${RED}✗ Could not read contract address from deployments/latest.json${RESET}"
-  cleanup
-fi
-
-echo -e "  ${GREEN}✓ Contract deployed${RESET}  →  ${CONTRACT_ADDRESS}"
-
-# Update frontend .env with new contract address
+# Update frontend .env with the contract address (creating it if missing —
+# without it, the app silently falls back to Amoy/empty-address defaults)
 ENV_FILE="$ROOT/frontend/.env"
-if [ -f "$ENV_FILE" ]; then
-  # Replace VITE_AGROCHAIN_ADDRESS line
+if [ ! -f "$ENV_FILE" ]; then
+  cat > "$ENV_FILE" <<EOF
+VITE_AGROCHAIN_ADDRESS=${CONTRACT_ADDRESS}
+VITE_CHAIN_ID=31337
+VITE_NETWORK_NAME=localhost
+EOF
+  echo -e "  ${GREEN}✓ frontend/.env created${RESET}"
+else
   sed -i '' "s|^VITE_AGROCHAIN_ADDRESS=.*|VITE_AGROCHAIN_ADDRESS=${CONTRACT_ADDRESS}|" "$ENV_FILE" 2>/dev/null \
     || sed -i "s|^VITE_AGROCHAIN_ADDRESS=.*|VITE_AGROCHAIN_ADDRESS=${CONTRACT_ADDRESS}|" "$ENV_FILE"
-  echo -e "  ${GREEN}✓ frontend/.env updated with new contract address${RESET}"
+  echo -e "  ${GREEN}✓ frontend/.env updated with contract address${RESET}"
 fi
 
-# Fund addresses
-if [ ${#FUND_ADDRESSES[@]} -gt 0 ]; then
+# Fund addresses (skip if reusing a chain — they were already funded)
+if [ "$REUSE_CHAIN" = false ] && [ ${#FUND_ADDRESSES[@]} -gt 0 ]; then
   echo -e "  ${YELLOW}⚙ Funding wallet addresses with test ETH...${RESET}"
   for ADDR in "${FUND_ADDRESSES[@]}"; do
     FUND_RESULT=$(node -e "

@@ -207,5 +207,26 @@ class TrackResponse(BaseModel):
     recall: Optional[RecallResponse] = None
 
 
+# ── Scan tracking (QR anti-cloning) ─────────────────────────────────────────
+
+class ScanStatsResponse(BaseModel):
+    total_scans: int
+    scans_24h: int
+    distinct_scanners_24h: int
+    suspicious: bool
+
+
+# ── Faucet ───────────────────────────────────────────────────────────────────
+
+class FaucetRequestBody(BaseModel):
+    address: str
+
+
+class FaucetResponse(BaseModel):
+    tx_hash: str
+    amount_eth: float
+    address: str
+
+
 # Resolve forward references
 ProductDetail.model_rebuild()

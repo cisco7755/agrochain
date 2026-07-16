@@ -1,6 +1,7 @@
 // test/AgroChain.test.js
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
+const { anyValue } = require("@nomicfoundation/hardhat-chai-matchers/withArgs");
 
 // Role enum values must mirror AgroChain.sol
 const Role = {
@@ -123,6 +124,127 @@ describe("AgroChain", function () {
           .connect(admin)
           .registerActor(farmer.address, "", Role.FARMER, "Nairobi")
       ).to.be.revertedWith("AgroChain: name cannot be empty");
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Self-service registration + admin approval
+  // -----------------------------------------------------------------------
+  describe("requestRegistration / approveActor", function () {
+    it("should create an inactive actor on request, and list it as pending", async function () {
+      await expect(
+        agroChain
+          .connect(farmer)
+          .requestRegistration("Green Farm", Role.FARMER, "Nairobi")
+      )
+        .to.emit(agroChain, "ActorRegistrationRequested")
+        .withArgs(farmer.address, "Green Farm", Role.FARMER);
+
+      const actor = await agroChain.getActor(farmer.address);
+      expect(actor.role).to.equal(Role.FARMER);
+      expect(actor.isActive).to.equal(false);
+
+      const pending = await agroChain.getPendingActors();
+      expect(pending.length).to.equal(1);
+      expect(pending[0].actorAddress).to.equal(farmer.address);
+    });
+
+    it("should block a pending actor from acting until approved", async function () {
+      await agroChain
+        .connect(farmer)
+        .requestRegistration("Green Farm", Role.FARMER, "Nairobi");
+
+      await expect(
+        agroChain
+          .connect(farmer)
+          .registerProduct(
+            productFixture.name,
+            productFixture.productType,
+            productFixture.batchNumber,
+            productFixture.farmLocation,
+            productFixture.isOrganic,
+            productFixture.harvestDate(),
+            productFixture.expiryDate(),
+            productFixture.description
+          )
+      ).to.be.revertedWith(
+        "AgroChain: caller is not a registered active actor"
+      );
+    });
+
+    it("should let admin approve a pending actor, unlocking full functionality", async function () {
+      await agroChain
+        .connect(farmer)
+        .requestRegistration("Green Farm", Role.FARMER, "Nairobi");
+
+      await expect(agroChain.connect(admin).approveActor(farmer.address))
+        .to.emit(agroChain, "ActorApproved")
+        .withArgs(farmer.address, Role.FARMER);
+
+      const actor = await agroChain.getActor(farmer.address);
+      expect(actor.isActive).to.equal(true);
+      expect(await agroChain.getPendingActors()).to.have.lengthOf(0);
+
+      await expect(
+        agroChain
+          .connect(farmer)
+          .registerProduct(
+            productFixture.name,
+            productFixture.productType,
+            productFixture.batchNumber,
+            productFixture.farmLocation,
+            productFixture.isOrganic,
+            productFixture.harvestDate(),
+            productFixture.expiryDate(),
+            productFixture.description
+          )
+      ).to.emit(agroChain, "ProductRegistered");
+    });
+
+    it("should revert if a non-admin tries to approve", async function () {
+      await agroChain
+        .connect(farmer)
+        .requestRegistration("Green Farm", Role.FARMER, "Nairobi");
+
+      await expect(
+        agroChain.connect(stranger).approveActor(farmer.address)
+      ).to.be.revertedWith("AgroChain: caller is not the admin");
+    });
+
+    it("should revert approving an address with no pending request", async function () {
+      await expect(
+        agroChain.connect(admin).approveActor(stranger.address)
+      ).to.be.revertedWith(
+        "AgroChain: no registration request for this address"
+      );
+    });
+
+    it("should revert requesting registration if already an active actor", async function () {
+      await agroChain
+        .connect(admin)
+        .registerActor(farmer.address, "Green Farm", Role.FARMER, "Nairobi");
+
+      await expect(
+        agroChain
+          .connect(farmer)
+          .requestRegistration("Green Farm 2", Role.CERTIFIER, "Mombasa")
+      ).to.be.revertedWith("AgroChain: already an active actor");
+    });
+
+    it("should let a pending actor edit their request before approval", async function () {
+      await agroChain
+        .connect(farmer)
+        .requestRegistration("Green Farm", Role.FARMER, "Nairobi");
+      await agroChain
+        .connect(farmer)
+        .requestRegistration("Green Farm Updated", Role.CERTIFIER, "Mombasa");
+
+      const actor = await agroChain.getActor(farmer.address);
+      expect(actor.name).to.equal("Green Farm Updated");
+      expect(actor.role).to.equal(Role.CERTIFIER);
+
+      // Editing before approval must not create a duplicate pending entry.
+      expect(await agroChain.getPendingActors()).to.have.lengthOf(1);
     });
   });
 
@@ -452,6 +574,58 @@ describe("AgroChain", function () {
     it("should return 0 for an unknown batch number", async function () {
       const productId = await agroChain.getProductByBatch("UNKNOWN-BATCH");
       expect(productId).to.equal(0);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Unit serialization (anti-cloning)
+  // -----------------------------------------------------------------------
+  describe("issueUnit", function () {
+    beforeEach(async function () {
+      await agroChain
+        .connect(admin)
+        .registerActor(farmer.address, "Green Farm", Role.FARMER, "Nairobi");
+
+      await agroChain.connect(farmer).registerProduct(
+        productFixture.name,
+        productFixture.productType,
+        productFixture.batchNumber,
+        productFixture.farmLocation,
+        productFixture.isOrganic,
+        productFixture.harvestDate(),
+        productFixture.expiryDate(),
+        productFixture.description
+      );
+    });
+
+    it("should issue sequential unit numbers starting at 1", async function () {
+      await expect(agroChain.connect(farmer).issueUnit(1))
+        .to.emit(agroChain, "UnitIssued")
+        .withArgs(1, 1, farmer.address, anyValue);
+
+      await agroChain.connect(farmer).issueUnit(1);
+      expect(await agroChain.unitCount(1)).to.equal(2);
+    });
+
+    it("should let any active registered actor issue a unit, not just the farmer", async function () {
+      await agroChain
+        .connect(admin)
+        .registerActor(distributor.address, "Swift Logistics", Role.DISTRIBUTOR, "Mombasa");
+
+      await agroChain.connect(distributor).issueUnit(1);
+      expect(await agroChain.unitCount(1)).to.equal(1);
+    });
+
+    it("should revert if the caller is not a registered active actor", async function () {
+      await expect(
+        agroChain.connect(stranger).issueUnit(1)
+      ).to.be.revertedWith("AgroChain: caller is not a registered active actor");
+    });
+
+    it("should revert if the product does not exist", async function () {
+      await expect(
+        agroChain.connect(farmer).issueUnit(999)
+      ).to.be.revertedWith("AgroChain: product does not exist");
     });
   });
 });

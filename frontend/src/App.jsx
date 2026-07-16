@@ -58,16 +58,17 @@ function Layout() {
           <Route path="/about" element={<About />} />
           <Route path="/profile" element={<Profile />} />
 
-          {/* Any registered role (not VIEWER) */}
+          {/* Any connected wallet — Dashboard itself routes VIEWER to a self-registration
+              form and PENDING to an approval-status screen */}
           <Route path="/dashboard" element={
-            <ProtectedRoute allowedRoles={['FARMER','PROCESSOR','DISTRIBUTOR','RETAILER','CERTIFIER','ADMIN']}>
+            <ProtectedRoute allowedRoles={['FARMER','PROCESSOR','DISTRIBUTOR','RETAILER','CERTIFIER','ADMIN','VIEWER','PENDING']}>
               <Dashboard />
             </ProtectedRoute>
           } />
 
-          {/* FARMER + ADMIN only */}
+          {/* FARMER only — the contract restricts registerProduct to the FARMER role */}
           <Route path="/register" element={
-            <ProtectedRoute allowedRoles={['FARMER', 'ADMIN']}>
+            <ProtectedRoute allowedRoles={['FARMER']}>
               <Register />
             </ProtectedRoute>
           } />
@@ -120,11 +121,23 @@ function AppContent() {
           name = actor.name || 'Admin';
         } else {
           const roleIndex = Number(actor.role);
-          role = roleIndex > 0 ? (ROLE_NAMES[roleIndex] || 'VIEWER') : 'VIEWER';
+          if (roleIndex > 0 && !actor.isActive) {
+            // Self-registered via requestRegistration but not yet approved —
+            // read-only until an admin calls approveActor.
+            role = 'PENDING';
+          } else {
+            role = roleIndex > 0 ? (ROLE_NAMES[roleIndex] || 'VIEWER') : 'VIEWER';
+          }
           name = actor.name || shortenAddress(account);
         }
 
-        login(null, { name, role, address: account });
+        login(null, {
+          name,
+          role,
+          address: account,
+          requestedRole: role === 'PENDING' ? (ROLE_NAMES[Number(actor.role)] || null) : null,
+          location: actor.location || '',
+        });
       } catch {
         // Wallet connected but not registered in contract — still let them in as VIEWER
         login(null, { name: shortenAddress(account), role: 'VIEWER', address: account });
@@ -154,6 +167,7 @@ function AppContent() {
     <Routes>
       {/* Public consumer verify — no Navbar */}
       <Route path="/verify/:productId" element={<Verify />} />
+      <Route path="/verify/:productId/:unitNumber" element={<Verify />} />
       {/* Main app with Navbar */}
       <Route path="/*" element={<Layout />} />
     </Routes>

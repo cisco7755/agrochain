@@ -77,6 +77,12 @@ contract AgroChain {
     mapping(address => Actor) public actors;
     mapping(string => uint256) public batchToProductId;
     uint256[] public productIds;
+    address[] public pendingActors;
+
+    // Per-unit QR serialization: each physical package printed for a product
+    // gets its own unit number (1..unitCount[productId]) so a cloned QR only
+    // implicates one physical item, not the whole batch.
+    mapping(uint256 => uint256) public unitCount;
 
     // -------------------------------------------------------------------------
     // Solidity events
@@ -102,9 +108,27 @@ contract AgroChain {
         Role role
     );
 
+    event ActorRegistrationRequested(
+        address indexed actorAddress,
+        string name,
+        Role role
+    );
+
+    event ActorApproved(
+        address indexed actorAddress,
+        Role role
+    );
+
     event ProductCertified(
         uint256 indexed productId,
         address indexed certifier
+    );
+
+    event UnitIssued(
+        uint256 indexed productId,
+        uint256 unitNumber,
+        address indexed issuedBy,
+        uint256 timestamp
     );
 
     // -------------------------------------------------------------------------
@@ -186,6 +210,91 @@ contract AgroChain {
         });
 
         emit ActorRegistered(_actorAddress, _name, _role);
+    }
+
+    /**
+     * @notice Self-service registration request. Creates the actor record
+     *         immediately but leaves it inactive (read-only) until an admin
+     *         calls {approveActor} — the caller cannot register products,
+     *         record events, or certify anything until then.
+     * @dev    Callers may call this again to edit their pending request as
+     *         long as they haven't been approved yet.
+     * @param _name     Human-readable name.
+     * @param _role     Requested role (must not be NONE).
+     * @param _location Geographic location / facility description.
+     */
+    function requestRegistration(
+        string calldata _name,
+        Role _role,
+        string calldata _location
+    ) external {
+        require(
+            !actors[msg.sender].isActive,
+            "AgroChain: already an active actor"
+        );
+        require(_role != Role.NONE, "AgroChain: role cannot be NONE");
+        require(bytes(_name).length > 0, "AgroChain: name cannot be empty");
+
+        if (actors[msg.sender].registeredAt == 0) {
+            pendingActors.push(msg.sender);
+        }
+
+        actors[msg.sender] = Actor({
+            actorAddress: msg.sender,
+            name: _name,
+            role: _role,
+            location: _location,
+            isActive: false,
+            registeredAt: block.timestamp
+        });
+
+        emit ActorRegistrationRequested(msg.sender, _name, _role);
+    }
+
+    /**
+     * @notice Approve a pending self-registration request, switching the
+     *         actor from read-only to fully functional for their requested
+     *         role.
+     * @param _actorAddress Address that previously called {requestRegistration}.
+     */
+    function approveActor(address _actorAddress) external onlyAdmin {
+        require(
+            actors[_actorAddress].registeredAt != 0,
+            "AgroChain: no registration request for this address"
+        );
+        require(
+            !actors[_actorAddress].isActive,
+            "AgroChain: actor is already active"
+        );
+
+        actors[_actorAddress].isActive = true;
+
+        emit ActorApproved(_actorAddress, actors[_actorAddress].role);
+        emit ActorRegistered(
+            _actorAddress,
+            actors[_actorAddress].name,
+            actors[_actorAddress].role
+        );
+    }
+
+    /**
+     * @notice Return full details for every actor still awaiting approval.
+     */
+    function getPendingActors() external view returns (Actor[] memory) {
+        uint256 count = 0;
+        for (uint256 i = 0; i < pendingActors.length; i++) {
+            if (!actors[pendingActors[i]].isActive) count++;
+        }
+
+        Actor[] memory result = new Actor[](count);
+        uint256 j = 0;
+        for (uint256 i = 0; i < pendingActors.length; i++) {
+            if (!actors[pendingActors[i]].isActive) {
+                result[j] = actors[pendingActors[i]];
+                j++;
+            }
+        }
+        return result;
     }
 
     // -------------------------------------------------------------------------
@@ -360,6 +469,33 @@ contract AgroChain {
             msg.sender,
             block.timestamp
         );
+    }
+
+    // -------------------------------------------------------------------------
+    // Unit serialization (anti-cloning)
+    // -------------------------------------------------------------------------
+
+    /**
+     * @notice Issue a new serialized unit number for a product — call once
+     *         per physical package printed, so each package's QR code
+     *         encodes a distinct unit rather than sharing one QR across an
+     *         entire batch. Any active registered actor may issue units
+     *         (packaging commonly happens downstream of the farmer).
+     * @param _productId Product this unit belongs to.
+     * @return unitNumber The newly assigned unit number (1-indexed).
+     */
+    function issueUnit(
+        uint256 _productId
+    )
+        external
+        onlyRegisteredActor
+        productExists(_productId)
+        returns (uint256 unitNumber)
+    {
+        unitCount[_productId] += 1;
+        unitNumber = unitCount[_productId];
+
+        emit UnitIssued(_productId, unitNumber, msg.sender, block.timestamp);
     }
 
     // -------------------------------------------------------------------------
