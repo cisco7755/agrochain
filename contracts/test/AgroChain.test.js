@@ -463,9 +463,19 @@ describe("AgroChain", function () {
   });
 
   // -----------------------------------------------------------------------
-  // Organic certification
+  // Certification (issue / revoke)
   // -----------------------------------------------------------------------
-  describe("certifyOrganic", function () {
+  const CertStandard = {
+    ORGANIC: 0,
+    FAIR_TRADE: 1,
+    NON_GMO: 2,
+    RAINFOREST_ALLIANCE: 3,
+    HACCP: 4,
+    ISO22000: 5,
+    OTHER: 6,
+  };
+
+  describe("issueCertification / revokeCertification", function () {
     beforeEach(async function () {
       await agroChain
         .connect(admin)
@@ -491,17 +501,56 @@ describe("AgroChain", function () {
       );
     });
 
-    it("should allow a CERTIFIER to certify an organic product", async function () {
-      await expect(agroChain.connect(certifier).certifyOrganic(1))
-        .to.emit(agroChain, "ProductCertified")
-        .withArgs(1, certifier.address);
+    it("should allow a CERTIFIER to issue a certification and mark ORGANIC products certified", async function () {
+      await expect(
+        agroChain
+          .connect(certifier)
+          .issueCertification(
+            1,
+            CertStandard.ORGANIC,
+            "USDA-ORG-2026-0143",
+            "Passed inspection",
+            "/static/certificates/report.pdf",
+            0
+          )
+      )
+        .to.emit(agroChain, "CertificationIssued")
+        .withArgs(1, 1, certifier.address, CertStandard.ORGANIC, "USDA-ORG-2026-0143", 0);
 
       const product = await agroChain.getProduct(1);
       expect(product.isCertified).to.equal(true);
+
+      const certs = await agroChain.getProductCertifications(1);
+      expect(certs.length).to.equal(1);
+      expect(certs[0].certNumber).to.equal("USDA-ORG-2026-0143");
+      expect(certs[0].revoked).to.equal(false);
     });
 
-    it("should add a CERTIFIED event after certification", async function () {
-      await agroChain.connect(certifier).certifyOrganic(1);
+    it("should not set isCertified for non-ORGANIC standards", async function () {
+      await agroChain
+        .connect(certifier)
+        .issueCertification(1, CertStandard.FAIR_TRADE, "FT-001", "", "", 0);
+
+      const product = await agroChain.getProduct(1);
+      expect(product.isCertified).to.equal(false);
+    });
+
+    it("should allow multiple certifications on the same product", async function () {
+      await agroChain
+        .connect(certifier)
+        .issueCertification(1, CertStandard.ORGANIC, "ORG-1", "", "", 0);
+      await agroChain
+        .connect(certifier)
+        .issueCertification(1, CertStandard.NON_GMO, "NGMO-1", "", "", 0);
+
+      const certs = await agroChain.getProductCertifications(1);
+      expect(certs.length).to.equal(2);
+    });
+
+    it("should add a CERTIFIED event after issuance", async function () {
+      await agroChain
+        .connect(certifier)
+        .issueCertification(1, CertStandard.ORGANIC, "ORG-1", "notes", "", 0);
 
       const events = await agroChain.getProductEvents(1);
       const certEvent = events[events.length - 1];
@@ -509,37 +558,92 @@ describe("AgroChain", function () {
       expect(certEvent.actor).to.equal(certifier.address);
     });
 
-    it("should revert if a non-CERTIFIER tries to certify", async function () {
+    it("should revert if a non-CERTIFIER tries to issue", async function () {
       await expect(
-        agroChain.connect(farmer).certifyOrganic(1)
+        agroChain
+          .connect(farmer)
+          .issueCertification(1, CertStandard.ORGANIC, "ORG-1", "", "", 0)
       ).to.be.revertedWith(
         "AgroChain: only CERTIFIER role can certify products"
       );
     });
 
-    it("should revert if the product is not organic", async function () {
-      // Register a non-organic product
-      await agroChain.connect(farmer).registerProduct(
-        "Regular Wheat",
-        "Grain",
-        "BATCH-NON-ORGANIC",
-        productFixture.farmLocation,
-        false, // not organic
-        productFixture.harvestDate(),
-        productFixture.expiryDate(),
-        "Non-organic wheat"
-      );
-
+    it("should revert if the certificate number is empty", async function () {
       await expect(
-        agroChain.connect(certifier).certifyOrganic(2)
-      ).to.be.revertedWith("AgroChain: product is not marked as organic");
+        agroChain
+          .connect(certifier)
+          .issueCertification(1, CertStandard.ORGANIC, "", "", "", 0)
+      ).to.be.revertedWith("AgroChain: certificate number required");
     });
 
-    it("should revert if the product is already certified", async function () {
-      await agroChain.connect(certifier).certifyOrganic(1);
+    it("should revert if expiry is in the past", async function () {
       await expect(
-        agroChain.connect(certifier).certifyOrganic(1)
-      ).to.be.revertedWith("AgroChain: product is already certified");
+        agroChain
+          .connect(certifier)
+          .issueCertification(1, CertStandard.ORGANIC, "ORG-1", "", "", 1)
+      ).to.be.revertedWith("AgroChain: expiry must be in the future");
+    });
+
+    it("should allow the issuing certifier to revoke their certification", async function () {
+      await agroChain
+        .connect(certifier)
+        .issueCertification(1, CertStandard.ORGANIC, "ORG-1", "", "", 0);
+
+      await expect(agroChain.connect(certifier).revokeCertification(1, "Fraudulent report"))
+        .to.emit(agroChain, "CertificationRevoked")
+        .withArgs(1, 1, certifier.address, "Fraudulent report");
+
+      const certs = await agroChain.getProductCertifications(1);
+      expect(certs[0].revoked).to.equal(true);
+      expect(certs[0].revokeReason).to.equal("Fraudulent report");
+
+      const product = await agroChain.getProduct(1);
+      expect(product.isCertified).to.equal(false);
+    });
+
+    it("should allow the admin to revoke any certification", async function () {
+      await agroChain
+        .connect(certifier)
+        .issueCertification(1, CertStandard.ORGANIC, "ORG-1", "", "", 0);
+      await agroChain.connect(admin).revokeCertification(1, "Admin override");
+
+      const certs = await agroChain.getProductCertifications(1);
+      expect(certs[0].revoked).to.equal(true);
+    });
+
+    it("should revert if a stranger tries to revoke", async function () {
+      await agroChain
+        .connect(certifier)
+        .issueCertification(1, CertStandard.ORGANIC, "ORG-1", "", "", 0);
+      await expect(
+        agroChain.connect(stranger).revokeCertification(1, "nope")
+      ).to.be.revertedWith(
+        "AgroChain: only the issuing certifier or admin can revoke"
+      );
+    });
+
+    it("should revert if already revoked", async function () {
+      await agroChain
+        .connect(certifier)
+        .issueCertification(1, CertStandard.ORGANIC, "ORG-1", "", "", 0);
+      await agroChain.connect(certifier).revokeCertification(1, "first");
+      await expect(
+        agroChain.connect(certifier).revokeCertification(1, "second")
+      ).to.be.revertedWith("AgroChain: certification already revoked");
+    });
+
+    it("should keep isCertified true if another active ORGANIC cert still covers the product", async function () {
+      await agroChain
+        .connect(certifier)
+        .issueCertification(1, CertStandard.ORGANIC, "ORG-1", "", "", 0);
+      await agroChain
+        .connect(certifier)
+        .issueCertification(1, CertStandard.ORGANIC, "ORG-2", "", "", 0);
+
+      await agroChain.connect(certifier).revokeCertification(1, "renewed");
+
+      const product = await agroChain.getProduct(1);
+      expect(product.isCertified).to.equal(true);
     });
   });
 
@@ -626,6 +730,119 @@ describe("AgroChain", function () {
       await expect(
         agroChain.connect(farmer).issueUnit(999)
       ).to.be.revertedWith("AgroChain: product does not exist");
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Chain-of-custody handoffs
+  // -----------------------------------------------------------------------
+  describe("initiateHandoff / confirmHandoff", function () {
+    beforeEach(async function () {
+      await agroChain
+        .connect(admin)
+        .registerActor(farmer.address, "Green Farm", Role.FARMER, "Nairobi");
+      await agroChain
+        .connect(admin)
+        .registerActor(distributor.address, "Swift Logistics", Role.DISTRIBUTOR, "Mombasa");
+
+      await agroChain.connect(farmer).registerProduct(
+        productFixture.name,
+        productFixture.productType,
+        productFixture.batchNumber,
+        productFixture.farmLocation,
+        productFixture.isOrganic,
+        productFixture.harvestDate(),
+        productFixture.expiryDate(),
+        productFixture.description
+      );
+    });
+
+    it("should initiate a handoff and record a SHIPPED event", async function () {
+      await expect(
+        agroChain
+          .connect(farmer)
+          .initiateHandoff(1, distributor.address, "DHL", "TRK-001", "Nairobi", 4, 65, "Leaving farm")
+      )
+        .to.emit(agroChain, "HandoffInitiated")
+        .withArgs(1, 1, farmer.address, distributor.address, "DHL", "TRK-001");
+
+      const events = await agroChain.getProductEvents(1);
+      const shipped = events[events.length - 1];
+      expect(shipped.eventType).to.equal(EventType.SHIPPED);
+      expect(shipped.actor).to.equal(farmer.address);
+    });
+
+    it("should revert if the recipient is not a registered active actor", async function () {
+      await expect(
+        agroChain
+          .connect(farmer)
+          .initiateHandoff(1, stranger.address, "DHL", "TRK-001", "Nairobi", 4, 65, "")
+      ).to.be.revertedWith("AgroChain: recipient is not a registered active actor");
+    });
+
+    it("should revert shipping to yourself", async function () {
+      await expect(
+        agroChain
+          .connect(farmer)
+          .initiateHandoff(1, farmer.address, "DHL", "TRK-001", "Nairobi", 4, 65, "")
+      ).to.be.revertedWith("AgroChain: cannot ship to yourself");
+    });
+
+    it("should let the recipient confirm and record a RECEIVED event", async function () {
+      await agroChain
+        .connect(farmer)
+        .initiateHandoff(1, distributor.address, "DHL", "TRK-001", "Nairobi", 4, 65, "Leaving farm");
+
+      await expect(
+        agroChain
+          .connect(distributor)
+          .confirmHandoff(1, "Mombasa", 6, 70, "Arrived intact", "/static/certificates/pod.pdf")
+      )
+        .to.emit(agroChain, "HandoffConfirmed")
+        .withArgs(1, 1, distributor.address);
+
+      const events = await agroChain.getProductEvents(1);
+      const received = events[events.length - 1];
+      expect(received.eventType).to.equal(EventType.RECEIVED);
+      expect(received.actor).to.equal(distributor.address);
+
+      const handoffs = await agroChain.getProductHandoffs(1);
+      expect(handoffs[0].confirmed).to.equal(true);
+      expect(handoffs[0].proofOfDeliveryUrl).to.equal("/static/certificates/pod.pdf");
+    });
+
+    it("should revert if someone other than the designated recipient tries to confirm", async function () {
+      await agroChain
+        .connect(farmer)
+        .initiateHandoff(1, distributor.address, "DHL", "TRK-001", "Nairobi", 4, 65, "");
+
+      await expect(
+        agroChain.connect(stranger).confirmHandoff(1, "Mombasa", 6, 70, "", "")
+      ).to.be.revertedWith(
+        "AgroChain: only the designated recipient can confirm this handoff"
+      );
+    });
+
+    it("should revert confirming an already-confirmed handoff", async function () {
+      await agroChain
+        .connect(farmer)
+        .initiateHandoff(1, distributor.address, "DHL", "TRK-001", "Nairobi", 4, 65, "");
+      await agroChain.connect(distributor).confirmHandoff(1, "Mombasa", 6, 70, "", "");
+
+      await expect(
+        agroChain.connect(distributor).confirmHandoff(1, "Mombasa", 6, 70, "", "")
+      ).to.be.revertedWith("AgroChain: handoff already confirmed");
+    });
+
+    it("should list the handoff under the recipient's incoming handoffs", async function () {
+      await agroChain
+        .connect(farmer)
+        .initiateHandoff(1, distributor.address, "DHL", "TRK-001", "Nairobi", 4, 65, "");
+
+      const incoming = await agroChain.getIncomingHandoffs(distributor.address);
+      expect(incoming.length).to.equal(1);
+      expect(incoming[0].productId).to.equal(1);
+      expect(incoming[0].confirmed).to.equal(false);
     });
   });
 });

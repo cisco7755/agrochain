@@ -74,6 +74,15 @@ export const uploadCertificate = (productId, file) => {
     headers: { 'Content-Type': 'multipart/form-data' },
   }).then((r) => r.data);
 };
+// Decoupled from any backend product row — used when issuing an on-chain
+// certification, where the document URL gets passed into issueCertification().
+export const uploadCertificationDocument = (file) => {
+  const form = new FormData();
+  form.append('file', file);
+  return api.post('/uploads/certification-document', form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  }).then((r) => r.data);
+};
 
 // ── Export ────────────────────────────────────────────────────────────────────
 export const exportProductAuditCSV = (id) =>

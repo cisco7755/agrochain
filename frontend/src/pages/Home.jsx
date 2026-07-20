@@ -123,7 +123,7 @@ export default function Home() {
           contract.getTotalProducts(),
           contract.queryFilter(contract.filters.ActorRegistered(), fromBlock),
           contract.queryFilter(contract.filters.EventRecorded(), fromBlock),
-          contract.queryFilter(contract.filters.ProductCertified(), fromBlock),
+          contract.queryFilter(contract.filters.CertificationIssued(), fromBlock),
         ]);
         if (!cancelled) {
           setStats({

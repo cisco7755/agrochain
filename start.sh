@@ -83,6 +83,14 @@ if [ "$RESET_CHAIN" = true ] || [ "$CHAIN_ALIVE" = false ]; then
   PORTS_TO_CLEAR+=(8545)
 fi
 
+# About to destroy a live chain — snapshot every registered actor first so
+# --fresh can restore them onto the new contract instead of silently
+# losing them. This is the ONLY thing that can ever wipe actor data now.
+if [ "$RESET_CHAIN" = true ] && [ "$CHAIN_ALIVE" = true ]; then
+  echo -e "${YELLOW}  ⚙ Snapshotting registered actors before reset...${RESET}"
+  (cd "$ROOT/contracts" && node scripts/snapshot-actors.js)
+fi
+
 for PORT in "${PORTS_TO_CLEAR[@]}"; do
   PIDS=$(lsof -ti tcp:$PORT 2>/dev/null)
   if [ -n "$PIDS" ]; then
@@ -201,6 +209,14 @@ else
   fi
 
   echo -e "  ${GREEN}✓ Contract deployed${RESET}  →  ${CONTRACT_ADDRESS}"
+
+  # Restore any actors snapshotted before this reset — keeps registered
+  # farmers/certifiers/etc. from vanishing just because the contract had to
+  # be redeployed (e.g. after a Solidity change).
+  if [ -f "$ROOT/contracts/deployments/actors-snapshot.json" ]; then
+    echo -e "  ${YELLOW}⚙ Restoring actors from pre-reset snapshot...${RESET}"
+    (cd "$ROOT/contracts" && node scripts/restore-actors.js)
+  fi
 fi
 
 # Update frontend .env with the contract address (creating it if missing —

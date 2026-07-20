@@ -79,6 +79,80 @@
       {
         "indexed": true,
         "internalType": "uint256",
+        "name": "certId",
+        "type": "uint256"
+      },
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "productId",
+        "type": "uint256"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "certifier",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "enum AgroChain.CertStandard",
+        "name": "standard",
+        "type": "uint8"
+      },
+      {
+        "indexed": false,
+        "internalType": "string",
+        "name": "certNumber",
+        "type": "string"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "expiresAt",
+        "type": "uint256"
+      }
+    ],
+    "name": "CertificationIssued",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "certId",
+        "type": "uint256"
+      },
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "productId",
+        "type": "uint256"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "revokedBy",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "string",
+        "name": "reason",
+        "type": "string"
+      }
+    ],
+    "name": "CertificationRevoked",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
         "name": "productId",
         "type": "uint256"
       },
@@ -110,17 +184,66 @@
       {
         "indexed": true,
         "internalType": "uint256",
+        "name": "handoffId",
+        "type": "uint256"
+      },
+      {
+        "indexed": true,
+        "internalType": "uint256",
         "name": "productId",
         "type": "uint256"
       },
       {
         "indexed": true,
         "internalType": "address",
-        "name": "certifier",
+        "name": "confirmedBy",
         "type": "address"
       }
     ],
-    "name": "ProductCertified",
+    "name": "HandoffConfirmed",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "handoffId",
+        "type": "uint256"
+      },
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "productId",
+        "type": "uint256"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "from",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "address",
+        "name": "to",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "string",
+        "name": "carrier",
+        "type": "string"
+      },
+      {
+        "indexed": false,
+        "internalType": "string",
+        "name": "trackingNumber",
+        "type": "string"
+      }
+    ],
+    "name": "HandoffInitiated",
     "type": "event"
   },
   {
@@ -278,11 +401,110 @@
     "inputs": [
       {
         "internalType": "uint256",
-        "name": "_productId",
+        "name": "",
         "type": "uint256"
       }
     ],
-    "name": "certifyOrganic",
+    "name": "certifications",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "certId",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "productId",
+        "type": "uint256"
+      },
+      {
+        "internalType": "enum AgroChain.CertStandard",
+        "name": "standard",
+        "type": "uint8"
+      },
+      {
+        "internalType": "string",
+        "name": "certNumber",
+        "type": "string"
+      },
+      {
+        "internalType": "address",
+        "name": "certifier",
+        "type": "address"
+      },
+      {
+        "internalType": "string",
+        "name": "notes",
+        "type": "string"
+      },
+      {
+        "internalType": "string",
+        "name": "documentUrl",
+        "type": "string"
+      },
+      {
+        "internalType": "uint256",
+        "name": "issuedAt",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "expiresAt",
+        "type": "uint256"
+      },
+      {
+        "internalType": "bool",
+        "name": "revoked",
+        "type": "bool"
+      },
+      {
+        "internalType": "string",
+        "name": "revokeReason",
+        "type": "string"
+      },
+      {
+        "internalType": "uint256",
+        "name": "revokedAt",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "_handoffId",
+        "type": "uint256"
+      },
+      {
+        "internalType": "string",
+        "name": "_destLocation",
+        "type": "string"
+      },
+      {
+        "internalType": "int256",
+        "name": "_destTemperature",
+        "type": "int256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "_destHumidity",
+        "type": "uint256"
+      },
+      {
+        "internalType": "string",
+        "name": "_receiveNotes",
+        "type": "string"
+      },
+      {
+        "internalType": "string",
+        "name": "_proofOfDeliveryUrl",
+        "type": "string"
+      }
+    ],
+    "name": "confirmHandoff",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -333,6 +555,117 @@
         "internalType": "struct AgroChain.Actor",
         "name": "",
         "type": "tuple"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "_actor",
+        "type": "address"
+      }
+    ],
+    "name": "getIncomingHandoffs",
+    "outputs": [
+      {
+        "components": [
+          {
+            "internalType": "uint256",
+            "name": "handoffId",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "productId",
+            "type": "uint256"
+          },
+          {
+            "internalType": "address",
+            "name": "from",
+            "type": "address"
+          },
+          {
+            "internalType": "address",
+            "name": "to",
+            "type": "address"
+          },
+          {
+            "internalType": "string",
+            "name": "carrier",
+            "type": "string"
+          },
+          {
+            "internalType": "string",
+            "name": "trackingNumber",
+            "type": "string"
+          },
+          {
+            "internalType": "string",
+            "name": "originLocation",
+            "type": "string"
+          },
+          {
+            "internalType": "int256",
+            "name": "originTemperature",
+            "type": "int256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "originHumidity",
+            "type": "uint256"
+          },
+          {
+            "internalType": "string",
+            "name": "shipNotes",
+            "type": "string"
+          },
+          {
+            "internalType": "uint256",
+            "name": "shippedAt",
+            "type": "uint256"
+          },
+          {
+            "internalType": "bool",
+            "name": "confirmed",
+            "type": "bool"
+          },
+          {
+            "internalType": "string",
+            "name": "destLocation",
+            "type": "string"
+          },
+          {
+            "internalType": "int256",
+            "name": "destTemperature",
+            "type": "int256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "destHumidity",
+            "type": "uint256"
+          },
+          {
+            "internalType": "string",
+            "name": "receiveNotes",
+            "type": "string"
+          },
+          {
+            "internalType": "string",
+            "name": "proofOfDeliveryUrl",
+            "type": "string"
+          },
+          {
+            "internalType": "uint256",
+            "name": "confirmedAt",
+            "type": "uint256"
+          }
+        ],
+        "internalType": "struct AgroChain.PendingHandoff[]",
+        "name": "",
+        "type": "tuple[]"
       }
     ],
     "stateMutability": "view",
@@ -496,6 +829,87 @@
         "type": "uint256"
       }
     ],
+    "name": "getProductCertifications",
+    "outputs": [
+      {
+        "components": [
+          {
+            "internalType": "uint256",
+            "name": "certId",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "productId",
+            "type": "uint256"
+          },
+          {
+            "internalType": "enum AgroChain.CertStandard",
+            "name": "standard",
+            "type": "uint8"
+          },
+          {
+            "internalType": "string",
+            "name": "certNumber",
+            "type": "string"
+          },
+          {
+            "internalType": "address",
+            "name": "certifier",
+            "type": "address"
+          },
+          {
+            "internalType": "string",
+            "name": "notes",
+            "type": "string"
+          },
+          {
+            "internalType": "string",
+            "name": "documentUrl",
+            "type": "string"
+          },
+          {
+            "internalType": "uint256",
+            "name": "issuedAt",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "expiresAt",
+            "type": "uint256"
+          },
+          {
+            "internalType": "bool",
+            "name": "revoked",
+            "type": "bool"
+          },
+          {
+            "internalType": "string",
+            "name": "revokeReason",
+            "type": "string"
+          },
+          {
+            "internalType": "uint256",
+            "name": "revokedAt",
+            "type": "uint256"
+          }
+        ],
+        "internalType": "struct AgroChain.Certification[]",
+        "name": "",
+        "type": "tuple[]"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "_productId",
+        "type": "uint256"
+      }
+    ],
     "name": "getProductEvents",
     "outputs": [
       {
@@ -545,6 +959,117 @@
     "type": "function"
   },
   {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "_productId",
+        "type": "uint256"
+      }
+    ],
+    "name": "getProductHandoffs",
+    "outputs": [
+      {
+        "components": [
+          {
+            "internalType": "uint256",
+            "name": "handoffId",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "productId",
+            "type": "uint256"
+          },
+          {
+            "internalType": "address",
+            "name": "from",
+            "type": "address"
+          },
+          {
+            "internalType": "address",
+            "name": "to",
+            "type": "address"
+          },
+          {
+            "internalType": "string",
+            "name": "carrier",
+            "type": "string"
+          },
+          {
+            "internalType": "string",
+            "name": "trackingNumber",
+            "type": "string"
+          },
+          {
+            "internalType": "string",
+            "name": "originLocation",
+            "type": "string"
+          },
+          {
+            "internalType": "int256",
+            "name": "originTemperature",
+            "type": "int256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "originHumidity",
+            "type": "uint256"
+          },
+          {
+            "internalType": "string",
+            "name": "shipNotes",
+            "type": "string"
+          },
+          {
+            "internalType": "uint256",
+            "name": "shippedAt",
+            "type": "uint256"
+          },
+          {
+            "internalType": "bool",
+            "name": "confirmed",
+            "type": "bool"
+          },
+          {
+            "internalType": "string",
+            "name": "destLocation",
+            "type": "string"
+          },
+          {
+            "internalType": "int256",
+            "name": "destTemperature",
+            "type": "int256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "destHumidity",
+            "type": "uint256"
+          },
+          {
+            "internalType": "string",
+            "name": "receiveNotes",
+            "type": "string"
+          },
+          {
+            "internalType": "string",
+            "name": "proofOfDeliveryUrl",
+            "type": "string"
+          },
+          {
+            "internalType": "uint256",
+            "name": "confirmedAt",
+            "type": "uint256"
+          }
+        ],
+        "internalType": "struct AgroChain.PendingHandoff[]",
+        "name": "",
+        "type": "tuple[]"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
     "inputs": [],
     "name": "getTotalProducts",
     "outputs": [
@@ -555,6 +1080,232 @@
       }
     ],
     "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "name": "handoffs",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "handoffId",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "productId",
+        "type": "uint256"
+      },
+      {
+        "internalType": "address",
+        "name": "from",
+        "type": "address"
+      },
+      {
+        "internalType": "address",
+        "name": "to",
+        "type": "address"
+      },
+      {
+        "internalType": "string",
+        "name": "carrier",
+        "type": "string"
+      },
+      {
+        "internalType": "string",
+        "name": "trackingNumber",
+        "type": "string"
+      },
+      {
+        "internalType": "string",
+        "name": "originLocation",
+        "type": "string"
+      },
+      {
+        "internalType": "int256",
+        "name": "originTemperature",
+        "type": "int256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "originHumidity",
+        "type": "uint256"
+      },
+      {
+        "internalType": "string",
+        "name": "shipNotes",
+        "type": "string"
+      },
+      {
+        "internalType": "uint256",
+        "name": "shippedAt",
+        "type": "uint256"
+      },
+      {
+        "internalType": "bool",
+        "name": "confirmed",
+        "type": "bool"
+      },
+      {
+        "internalType": "string",
+        "name": "destLocation",
+        "type": "string"
+      },
+      {
+        "internalType": "int256",
+        "name": "destTemperature",
+        "type": "int256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "destHumidity",
+        "type": "uint256"
+      },
+      {
+        "internalType": "string",
+        "name": "receiveNotes",
+        "type": "string"
+      },
+      {
+        "internalType": "string",
+        "name": "proofOfDeliveryUrl",
+        "type": "string"
+      },
+      {
+        "internalType": "uint256",
+        "name": "confirmedAt",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      },
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "name": "incomingHandoffs",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "_productId",
+        "type": "uint256"
+      },
+      {
+        "internalType": "address",
+        "name": "_to",
+        "type": "address"
+      },
+      {
+        "internalType": "string",
+        "name": "_carrier",
+        "type": "string"
+      },
+      {
+        "internalType": "string",
+        "name": "_trackingNumber",
+        "type": "string"
+      },
+      {
+        "internalType": "string",
+        "name": "_originLocation",
+        "type": "string"
+      },
+      {
+        "internalType": "int256",
+        "name": "_originTemperature",
+        "type": "int256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "_originHumidity",
+        "type": "uint256"
+      },
+      {
+        "internalType": "string",
+        "name": "_shipNotes",
+        "type": "string"
+      }
+    ],
+    "name": "initiateHandoff",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "handoffId",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "_productId",
+        "type": "uint256"
+      },
+      {
+        "internalType": "enum AgroChain.CertStandard",
+        "name": "_standard",
+        "type": "uint8"
+      },
+      {
+        "internalType": "string",
+        "name": "_certNumber",
+        "type": "string"
+      },
+      {
+        "internalType": "string",
+        "name": "_notes",
+        "type": "string"
+      },
+      {
+        "internalType": "string",
+        "name": "_documentUrl",
+        "type": "string"
+      },
+      {
+        "internalType": "uint256",
+        "name": "_expiresAt",
+        "type": "uint256"
+      }
+    ],
+    "name": "issueCertification",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "certId",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable",
     "type": "function"
   },
   {
@@ -608,6 +1359,30 @@
         "type": "uint256"
       }
     ],
+    "name": "productCertifications",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
     "name": "productEvents",
     "outputs": [
       {
@@ -643,6 +1418,30 @@
       {
         "internalType": "uint256",
         "name": "timestamp",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "name": "productHandoffs",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
         "type": "uint256"
       }
     ],
@@ -886,6 +1685,24 @@
       }
     ],
     "name": "requestRegistration",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "_certId",
+        "type": "uint256"
+      },
+      {
+        "internalType": "string",
+        "name": "_reason",
+        "type": "string"
+      }
+    ],
+    "name": "revokeCertification",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"

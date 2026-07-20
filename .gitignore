@@ -99,6 +99,9 @@ coverage.json
 .env.contracts
 .env.local
 
+# Transient actor snapshots taken around a --fresh chain reset
+contracts/deployments/actors-snapshot*.json
+
 # ─── System Files ─────────────────────────────────────────────────────────────
 .DS_Store
 .AppleDouble

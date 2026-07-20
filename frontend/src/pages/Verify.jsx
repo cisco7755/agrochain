@@ -5,10 +5,12 @@ import {
   CheckCircle2, Leaf, Award, Shield, Share2, MapPin,
   User, Calendar, Hash, AlertCircle, Loader2, Sprout,
   Truck, Package, Factory, ShoppingCart, ArrowLeft,
-  ScanLine, ShieldAlert, Tag,
+  ScanLine, ShieldAlert, Tag, FileText, ShieldOff, Clock,
+  ArrowRight, Thermometer,
 } from 'lucide-react';
 import { useContract } from '../hooks/useContract';
 import { logScan } from '../services/api';
+import { checkColdChainViolation } from '../utils/coldChain';
 
 // ── Enum maps (must match AgroChain.sol) ─────────────────────────────────────
 const EVENT_TYPE_NAMES = [
@@ -16,6 +18,16 @@ const EVENT_TYPE_NAMES = [
   'SHIPPED', 'RECEIVED', 'CERTIFIED', 'SOLD',
 ];
 const ROLE_NAMES = ['NONE', 'FARMER', 'PROCESSOR', 'DISTRIBUTOR', 'RETAILER', 'CERTIFIER'];
+const STANDARD_NAMES = ['ORGANIC', 'FAIR_TRADE', 'NON_GMO', 'RAINFOREST_ALLIANCE', 'HACCP', 'ISO22000', 'OTHER'];
+const STANDARD_LABELS = {
+  ORGANIC: 'Organic', FAIR_TRADE: 'Fair Trade', NON_GMO: 'Non-GMO',
+  RAINFOREST_ALLIANCE: 'Rainforest Alliance', HACCP: 'HACCP', ISO22000: 'ISO 22000', OTHER: 'Other',
+};
+const STANDARD_COLORS = {
+  ORGANIC: 'bg-green-100 text-green-700', FAIR_TRADE: 'bg-pink-100 text-pink-700',
+  NON_GMO: 'bg-blue-100 text-blue-700', RAINFOREST_ALLIANCE: 'bg-emerald-100 text-emerald-700',
+  HACCP: 'bg-indigo-100 text-indigo-700', ISO22000: 'bg-purple-100 text-purple-700', OTHER: 'bg-gray-100 text-gray-700',
+};
 
 function formatDate(ts) {
   if (!ts) return '—';
@@ -49,9 +61,11 @@ const STEP_COLORS = {
 };
 
 async function loadFromChain(contract, productId) {
-  const [rawProduct, rawEvents] = await Promise.all([
+  const [rawProduct, rawEvents, rawCerts, rawHandoffs] = await Promise.all([
     contract.getProduct(productId),
     contract.getProductEvents(productId),
+    contract.getProductCertifications(productId).catch(() => []),
+    contract.getProductHandoffs(productId).catch(() => []),
   ]);
 
   let farmerName = null;
@@ -73,9 +87,41 @@ async function loadFromChain(contract, productId) {
     return actorCache[key];
   };
 
-  await Promise.all(
-    [...new Set(rawEvents.map((e) => (e.actor || e[1]).toLowerCase()))].map(getActorInfo),
-  );
+  await Promise.all([
+    ...[...new Set(rawEvents.map((e) => (e.actor || e[1]).toLowerCase()))].map(getActorInfo),
+    ...[...new Set(rawCerts.map((c) => c.certifier.toLowerCase()))].map(getActorInfo),
+    ...[...new Set(rawHandoffs.flatMap((h) => [h.from.toLowerCase(), h.to.toLowerCase()]))].map(getActorInfo),
+  ]);
+
+  const certifications = rawCerts.map((c) => ({
+    certId: Number(c.certId),
+    standard: STANDARD_NAMES[Number(c.standard)] || 'OTHER',
+    certNumber: c.certNumber,
+    certifierName: actorCache[c.certifier.toLowerCase()]?.name || null,
+    notes: c.notes,
+    documentUrl: c.documentUrl,
+    issuedAt: Number(c.issuedAt),
+    expiresAt: Number(c.expiresAt),
+    revoked: c.revoked,
+  }));
+
+  const handoffs = rawHandoffs.map((h) => ({
+    handoffId: Number(h.handoffId),
+    fromName: actorCache[h.from.toLowerCase()]?.name || null,
+    toName: actorCache[h.to.toLowerCase()]?.name || null,
+    carrier: h.carrier,
+    trackingNumber: h.trackingNumber,
+    originLocation: h.originLocation,
+    originTemperature: Number(h.originTemperature),
+    originHumidity: Number(h.originHumidity),
+    shippedAt: Number(h.shippedAt),
+    confirmed: h.confirmed,
+    destLocation: h.destLocation,
+    destTemperature: Number(h.destTemperature),
+    destHumidity: Number(h.destHumidity),
+    proofOfDeliveryUrl: h.proofOfDeliveryUrl,
+    confirmedAt: Number(h.confirmedAt),
+  }));
 
   const harvestTs = Number(rawProduct.harvestDate) > 0
     ? new Date(Number(rawProduct.harvestDate) * 1000).toISOString() : null;
@@ -113,7 +159,7 @@ async function loadFromChain(contract, productId) {
     };
   });
 
-  return { product, events };
+  return { product, events, certifications, handoffs };
 }
 
 export default function Verify() {
@@ -122,6 +168,8 @@ export default function Verify() {
   const { getAgroChain } = useContract();
   const [product, setProduct] = useState(null);
   const [events, setEvents]   = useState([]);
+  const [certifications, setCertifications] = useState([]);
+  const [handoffs, setHandoffs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState('');
   const [unitValid, setUnitValid] = useState(true);
@@ -146,6 +194,8 @@ export default function Verify() {
         const data = await loadFromChain(contract, id);
         setProduct(data.product);
         setEvents(data.events);
+        setCertifications(data.certifications);
+        setHandoffs(data.handoffs);
 
         const unit = unitNumber ? parseInt(unitNumber, 10) : null;
         if (unit) {
@@ -312,6 +362,117 @@ export default function Verify() {
             </div>
           </div>
         </div>
+
+        {/* Certifications */}
+        {certifications.length > 0 && (
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
+            <h2 className="text-base font-bold text-gray-900 mb-4">
+              Certifications
+              <span className="ml-2 text-xs font-medium text-gray-400">{certifications.length} issued</span>
+            </h2>
+            <div className="space-y-3">
+              {certifications.map((c) => {
+                const expired = c.expiresAt > 0 && c.expiresAt * 1000 < Date.now();
+                return (
+                  <div key={c.certId} className={`rounded-xl border p-4 ${c.revoked ? 'border-red-100 bg-red-50/50' : expired ? 'border-gray-100 bg-gray-50' : 'border-amber-100 bg-amber-50/40'}`}>
+                    <div className="flex items-start justify-between gap-3 flex-wrap">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className={`text-xs font-bold px-2 py-1 rounded-full ${STANDARD_COLORS[c.standard]}`}>
+                          {STANDARD_LABELS[c.standard]}
+                        </span>
+                        <span className="text-sm font-mono font-semibold text-gray-700">{c.certNumber}</span>
+                      </div>
+                      {c.revoked ? (
+                        <span className="text-xs font-bold text-red-600 bg-white px-2 py-1 rounded-full flex items-center gap-1">
+                          <ShieldOff className="w-3 h-3" /> Revoked
+                        </span>
+                      ) : expired ? (
+                        <span className="text-xs font-bold text-gray-500 bg-white px-2 py-1 rounded-full flex items-center gap-1">
+                          <Clock className="w-3 h-3" /> Expired
+                        </span>
+                      ) : (
+                        <span className="text-xs font-bold text-green-700 bg-white px-2 py-1 rounded-full flex items-center gap-1">
+                          <CheckCircle2 className="w-3 h-3" /> Active
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-gray-500 mt-2">
+                      Issued by {c.certifierName || 'a verified certifier'} · {formatDate(c.issuedAt * 1000)}
+                      {c.expiresAt > 0 && <> · Expires {formatDate(c.expiresAt * 1000)}</>}
+                    </p>
+                    {c.revoked && <p className="text-xs text-red-700 mt-1 font-medium">Do not rely on this certification — it was revoked after issuance.</p>}
+                    {c.notes && <p className="text-xs text-gray-500 mt-1 italic">"{c.notes}"</p>}
+                    {c.documentUrl && !c.revoked && (
+                      <a href={`http://${window.location.hostname}:8000${c.documentUrl}`} target="_blank" rel="noreferrer"
+                        className="inline-flex items-center gap-1.5 text-xs font-semibold text-amber-700 hover:text-amber-800 mt-2">
+                        <FileText className="w-3.5 h-3.5" /> View certificate document
+                      </a>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Shipment legs */}
+        {handoffs.length > 0 && (
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
+            <h2 className="text-base font-bold text-gray-900 mb-4">
+              Shipment Chain of Custody
+              <span className="ml-2 text-xs font-medium text-gray-400">{handoffs.length} leg{handoffs.length === 1 ? '' : 's'}</span>
+            </h2>
+            <div className="space-y-3">
+              {handoffs.map((h) => {
+                const originViolation = checkColdChainViolation(product.product_type, h.originTemperature, h.originHumidity);
+                const destViolation = h.confirmed ? checkColdChainViolation(product.product_type, h.destTemperature, h.destHumidity) : null;
+                return (
+                  <div key={h.handoffId} className={`rounded-xl border p-4 ${(originViolation || destViolation) ? 'border-red-200 bg-red-50/40' : 'border-gray-100'}`}>
+                    <div className="flex items-center justify-between gap-2 flex-wrap mb-3">
+                      <div className="flex items-center gap-2 text-sm font-semibold text-gray-800">
+                        <Truck className="w-4 h-4 text-indigo-500" />
+                        {h.fromName || 'Sender'} <ArrowRight className="w-3.5 h-3.5 text-gray-400" /> {h.toName || 'Recipient'}
+                      </div>
+                      {h.confirmed ? (
+                        <span className="text-xs font-bold text-green-700 bg-green-50 px-2 py-1 rounded-full">Delivered</span>
+                      ) : (
+                        <span className="text-xs font-bold text-amber-700 bg-amber-50 px-2 py-1 rounded-full">In Transit</span>
+                      )}
+                    </div>
+                    {(h.carrier || h.trackingNumber) && (
+                      <p className="text-xs text-gray-500 mb-3">
+                        {h.carrier}{h.carrier && h.trackingNumber && ' · '}
+                        {h.trackingNumber && <span className="font-mono">{h.trackingNumber}</span>}
+                      </p>
+                    )}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <div className={`rounded-lg p-3 ${originViolation ? 'bg-red-50 border border-red-200' : 'bg-gray-50'}`}>
+                        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Origin</p>
+                        <p className="text-sm font-bold text-gray-800">{h.originLocation}</p>
+                        <p className="text-xs text-gray-500 mt-1 flex items-center gap-1"><Thermometer className="w-3 h-3" />{h.originTemperature}°C · {h.originHumidity}% humidity</p>
+                        {originViolation && <p className="text-xs text-red-700 font-semibold mt-1">Cold chain breach</p>}
+                      </div>
+                      {h.confirmed && (
+                        <div className={`rounded-lg p-3 ${destViolation ? 'bg-red-50 border border-red-200' : 'bg-gray-50'}`}>
+                          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Destination</p>
+                          <p className="text-sm font-bold text-gray-800">{h.destLocation}</p>
+                          <p className="text-xs text-gray-500 mt-1 flex items-center gap-1"><Thermometer className="w-3 h-3" />{h.destTemperature}°C · {h.destHumidity}% humidity</p>
+                          {destViolation && <p className="text-xs text-red-700 font-semibold mt-1">Cold chain breach</p>}
+                        </div>
+                      )}
+                    </div>
+                    {h.proofOfDeliveryUrl && (
+                      <a href={`http://${window.location.hostname}:8000${h.proofOfDeliveryUrl}`} target="_blank" rel="noreferrer"
+                        className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-700 hover:text-indigo-800 mt-3">
+                        <FileText className="w-3.5 h-3.5" /> View proof of delivery
+                      </a>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Journey */}
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
